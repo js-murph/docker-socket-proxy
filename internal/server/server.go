@@ -9,162 +9,128 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/http/httputil"
 	"os"
-	"path/filepath"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 
 	"docker-socket-proxy/internal/logging"
 	"docker-socket-proxy/internal/management"
 	"docker-socket-proxy/internal/proxy/config"
-
-	"github.com/google/uuid"
 )
 
 type Server struct {
-	listener        net.Listener
-	server          *http.Server
-	socketPath      string
-	socketConfigs   map[string]*config.SocketConfig // Map socket paths to their configurations
-	socketConfigsMu sync.RWMutex                    // Mutex for thread-safe access
-	paths           *management.SocketPaths
+	managementSocket string
+	dockerSocket     string
+	server           *http.Server
+	socketConfigs    map[string]*config.SocketConfig
+	configMu         sync.RWMutex
+	createdSockets   []string // Track created socket paths
+	socketMu         sync.RWMutex
 }
 
+type contextKey string
+
+const serverContextKey contextKey = "server"
+
 func New(paths *management.SocketPaths) *Server {
+	if err := paths.Validate(); err != nil {
+		panic(fmt.Sprintf("invalid socket paths: %v", err))
+	}
+
 	return &Server{
-		socketConfigs: make(map[string]*config.SocketConfig),
-		paths:         paths,
+		managementSocket: paths.Management,
+		dockerSocket:     paths.Docker,
+		socketConfigs:    make(map[string]*config.SocketConfig),
+		createdSockets:   make([]string, 0),
+	}
+}
+
+// TrackSocket adds a socket path to the list of created sockets
+func (s *Server) TrackSocket(path string) {
+	s.socketMu.Lock()
+	defer s.socketMu.Unlock()
+	s.createdSockets = append(s.createdSockets, path)
+}
+
+// UntrackSocket removes a socket path from the list of created sockets
+func (s *Server) UntrackSocket(path string) {
+	s.socketMu.Lock()
+	defer s.socketMu.Unlock()
+	for i, p := range s.createdSockets {
+		if p == path {
+			s.createdSockets = append(s.createdSockets[:i], s.createdSockets[i+1:]...)
+			break
+		}
 	}
 }
 
 func (s *Server) Start() error {
-	// Remove existing management socket if it exists
-	if err := os.Remove(s.paths.Management); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to remove existing management socket: %v", err)
+	if err := s.prepareSocket(); err != nil {
+		return err
 	}
 
-	// Create management socket listener
-	listener, err := net.Listen("unix", s.paths.Management)
+	// Set up signal handling
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		log := logging.GetLogger()
+		log.Info("Shutdown signal received, cleaning up...")
+		s.Stop()
+		os.Exit(0)
+	}()
+
+	listener, err := net.Listen("unix", s.managementSocket)
 	if err != nil {
-		return fmt.Errorf("failed to create management listener: %v", err)
+		return fmt.Errorf("failed to create listener: %v", err)
 	}
 
-	// Create HTTP server to handle socket creation requests
+	handler := NewManagementHandler(s.dockerSocket, s.socketConfigs, &s.configMu)
 	s.server = &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.URL.Path == "/create-socket" && r.Method == "POST":
-				s.handleCreateSocket(w, r)
-			case r.URL.Path == "/delete-socket" && r.Method == "DELETE":
-				s.handleDeleteSocket(w, r)
-			default:
-				http.Error(w, "Not found", http.StatusNotFound)
-			}
+			ctx := context.WithValue(r.Context(), serverContextKey, s)
+			handler.ServeHTTP(w, r.WithContext(ctx))
 		}),
 	}
 
 	log := logging.GetLogger()
-	log.Info("Management server listening on socket", "path", s.paths.Management)
+	log.Info("Management server listening on socket", "path", s.managementSocket)
+
 	return s.server.Serve(listener)
 }
 
-func (s *Server) handleCreateSocket(w http.ResponseWriter, r *http.Request) {
-	// Read the configuration from the request body
-	var socketConfig *config.SocketConfig
-	if r.Body != nil {
-		if err := json.NewDecoder(r.Body).Decode(&socketConfig); err != nil {
-			if err == io.EOF {
-				http.Error(w, "empty configuration provided", http.StatusBadRequest)
-			} else {
-				http.Error(w, fmt.Sprintf("invalid configuration format: %v", err), http.StatusBadRequest)
-			}
-			return
-		}
+func (s *Server) Stop() {
+	if s.server != nil {
+		s.server.Shutdown(context.Background())
 	}
-
-	// Validate configuration
-	if err := config.ValidateConfig(socketConfig); err != nil {
-		http.Error(w, fmt.Sprintf("invalid configuration: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	// Generate unique socket path
-	socketPath := filepath.Join(os.TempDir(), fmt.Sprintf("docker-proxy-%s.sock", uuid.New().String()))
-
-	// Remove existing socket file if it exists
-	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
-		http.Error(w, fmt.Sprintf("failed to remove existing socket: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	// Create Unix domain socket listener
-	listener, err := net.Listen("unix", socketPath)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to create socket listener: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	s.listener = listener
-	s.socketPath = socketPath
-
-	// Store the configuration if provided
-	if socketConfig != nil {
-		s.socketConfigsMu.Lock()
-		s.socketConfigs[socketPath] = socketConfig
-		s.socketConfigsMu.Unlock()
-	}
-
-	// Create proxy to Docker socket with ACL middleware
-	proxy := &httputil.ReverseProxy{
-		Director: func(req *http.Request) {
-			req.URL.Scheme = "http"
-			req.URL.Host = "unix-socket"
-		},
-		Transport: &http.Transport{
-			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-				return net.Dial("unix", s.paths.Docker)
-			},
-		},
-	}
-
-	// Start serving Docker requests on the new socket
-	go func() {
-		proxyServer := &http.Server{
-			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				s.handleDockerRequest(w, r)
-				proxy.ServeHTTP(w, r)
-			}),
-		}
-		if err := proxyServer.Serve(listener); err != nil && err != http.ErrServerClosed {
-			log := logging.GetLogger()
-			log.Error("Proxy server error", "error", err)
-		}
-	}()
-
-	// Return the socket path to the client
-	w.Write([]byte(socketPath))
+	s.cleanup()
 }
 
-func (s *Server) checkACLRules(socketPath string, r *http.Request) (bool, string) {
-	s.socketConfigsMu.RLock()
-	config, exists := s.socketConfigs[socketPath]
-	s.socketConfigsMu.RUnlock()
-
-	if !exists || config == nil {
-		return true, "" // No config means allowed
+func (s *Server) prepareSocket() error {
+	if err := os.Remove(s.managementSocket); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove existing socket: %v", err)
 	}
+	return nil
+}
 
-	// Check each rule
-	for _, rule := range config.Rules.ACLs {
-		if matchesRule(r, rule.Match) {
-			if rule.Action == "deny" {
-				return false, rule.Reason
-			}
+func (s *Server) cleanup() {
+	// Clean up management socket
+	os.Remove(s.managementSocket)
+
+	// Clean up all created sockets
+	s.socketMu.Lock()
+	for _, socketPath := range s.createdSockets {
+		if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
+			log := logging.GetLogger()
+			log.Error("Failed to remove socket during cleanup",
+				"path", socketPath,
+				"error", err)
 		}
 	}
-
-	return true, ""
+	s.createdSockets = nil
+	s.socketMu.Unlock()
 }
 
 func matchesRule(r *http.Request, match config.Match) bool {
@@ -247,48 +213,10 @@ func deepGet(m map[string]interface{}, path []string) (interface{}, bool) {
 	return nil, false
 }
 
-func (s *Server) handleDeleteSocket(w http.ResponseWriter, r *http.Request) {
-	log := logging.GetLogger()
-
-	socketPath := r.Header.Get("Socket-Path")
-	if socketPath == "" {
-		http.Error(w, "Socket-Path header required", http.StatusBadRequest)
-		return
-	}
-
-	// Remove the socket file
-	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
-		http.Error(w, fmt.Sprintf("failed to delete socket: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	// Clean up the configuration
-	s.socketConfigsMu.Lock()
-	delete(s.socketConfigs, socketPath)
-	s.socketConfigsMu.Unlock()
-
-	log.Info("Deleted socket and configuration for", "path", socketPath)
-	w.WriteHeader(http.StatusOK)
-}
-
-func (s *Server) Stop() {
-	if s.server != nil {
-		s.server.Shutdown(context.Background())
-	}
-	if s.listener != nil {
-		s.listener.Close()
-	}
-	os.Remove(s.socketPath)
-}
-
-func (s *Server) GetSocketPath() string {
-	return s.socketPath
-}
-
 func (s *Server) applyRewriteRules(socketPath string, r *http.Request) error {
-	s.socketConfigsMu.RLock()
+	s.configMu.RLock()
 	config, exists := s.socketConfigs[socketPath]
-	s.socketConfigsMu.RUnlock()
+	s.configMu.RUnlock()
 
 	if !exists || config == nil || len(config.Rules.Rewrites) == 0 {
 		return nil // No rewrites needed
@@ -736,34 +664,4 @@ func deleteEnvVars(body map[string]interface{}, path []string, arr []interface{}
 		return deepSet(body, path, newArr)
 	}
 	return false
-}
-
-func (s *Server) handleDockerRequest(w http.ResponseWriter, r *http.Request) {
-	log := logging.GetLogger()
-
-	log.Debug("Received Docker API request",
-		"method", r.Method,
-		"path", r.URL.Path)
-
-	// Apply ACL rules
-	if allowed, reason := s.checkACLRules(s.socketPath, r); !allowed {
-		log.Info("Request denied by ACL",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"reason", reason)
-		http.Error(w, reason, http.StatusForbidden)
-		return
-	}
-
-	// Apply rewrite rules if needed
-	if err := s.applyRewriteRules(s.socketPath, r); err != nil {
-		log.Error("Failed to apply rewrite rules",
-			"error", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	log.Debug("Forwarding request to Docker daemon",
-		"method", r.Method,
-		"path", r.URL.Path)
 }

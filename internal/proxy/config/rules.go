@@ -6,11 +6,18 @@ import (
 	"path/filepath"
 	"reflect"
 
+	"docker-socket-proxy/internal/logging"
+
 	"gopkg.in/yaml.v3"
 )
 
 type SocketConfig struct {
-	Rules RuleSet `yaml:"rules"`
+	Config ConfigSet `json:"config" yaml:"config"`
+	Rules  RuleSet   `json:"rules" yaml:"rules"`
+}
+
+type ConfigSet struct {
+	PropagateSocket string `yaml:"propagate_socket"`
 }
 
 type RuleSet struct {
@@ -257,5 +264,32 @@ func MatchValue(pattern interface{}, value interface{}) bool {
 	default:
 		// For non-string/array types, use exact matching
 		return reflect.DeepEqual(pattern, value)
+	}
+}
+
+// GetPropagationRules returns rewrite rules for socket propagation if enabled
+func (c *SocketConfig) GetPropagationRules() []RewriteRule {
+	if c.Config.PropagateSocket == "" {
+		return nil
+	}
+
+	log := logging.GetLogger()
+	log.Debug("Creating propagation rules",
+		"socket", c.Config.PropagateSocket)
+
+	return []RewriteRule{
+		{
+			Match: Match{
+				Path:   "/v1.*/containers/create",
+				Method: "POST",
+			},
+			Patterns: []Pattern{
+				{
+					Field:  "HostConfig.Binds",
+					Action: "upsert",
+					Value:  []interface{}{fmt.Sprintf("%s:%s:ro", c.Config.PropagateSocket, c.Config.PropagateSocket)},
+				},
+			},
+		},
 	}
 }
