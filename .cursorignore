@@ -1,0 +1,8 @@
+bin/**
+.hermit/**
+.git/**
+.vscode/**
+.idea/**
+.DS_Store
+
+go.sum

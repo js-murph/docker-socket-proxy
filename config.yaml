@@ -1,0 +1,36 @@
+rules:
+  acls:
+    - match:
+        path: "/v1.*/volumes"
+        method: "GET"
+      action: "deny"
+      reason: "Listing volumes is restricted"
+
+    - match:
+        path: "/v1.*/containers/create"
+        method: "POST"
+        contains:
+          Env:
+            - "BLOCK=true"
+      action: "deny"
+      reason: "Blocked creation of containers with restricted env variables"
+
+  rewrites:
+    - match:
+        path: "/v1.*/containers/create"
+        method: "POST"
+      patterns:
+        - field: "Env"
+          action: "upsert"
+          value: "FUN=yes"
+        - field: "Env"
+          action: "replace"
+          match: "DEBUG=true"
+          value: "DEBUG=false"
+        - field: "HostConfig.Privileged"
+          action: "replace"
+          match: true
+          value: false
+        - field: "Env"
+          action: "delete"
+          match: "PANTS=*"
