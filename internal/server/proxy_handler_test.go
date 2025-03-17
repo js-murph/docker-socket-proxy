@@ -30,7 +30,7 @@ func TestProxyHandler_CheckACLRules(t *testing.T) {
 			wantReason: "",
 		},
 		{
-			name:       "explicit allow rule",
+			name:       "explicit allow rule matches",
 			socketPath: "/tmp/test.sock",
 			config: &config.SocketConfig{
 				Rules: config.RuleSet{
@@ -47,7 +47,7 @@ func TestProxyHandler_CheckACLRules(t *testing.T) {
 			wantReason: "",
 		},
 		{
-			name:       "explicit deny rule",
+			name:       "explicit deny rule matches",
 			socketPath: "/tmp/test.sock",
 			config: &config.SocketConfig{
 				Rules: config.RuleSet{
@@ -63,6 +63,45 @@ func TestProxyHandler_CheckACLRules(t *testing.T) {
 			request:    httptest.NewRequest("POST", "/test", nil),
 			want:       false,
 			wantReason: "method not allowed",
+		},
+		{
+			name:       "no matching rules defaults to deny",
+			socketPath: "/tmp/test.sock",
+			config: &config.SocketConfig{
+				Rules: config.RuleSet{
+					ACLs: []config.Rule{
+						{
+							Match:  config.Match{Path: "/other", Method: "GET"},
+							Action: "allow",
+						},
+					},
+				},
+			},
+			request:    httptest.NewRequest("GET", "/test", nil),
+			want:       false,
+			wantReason: "No matching allow rules",
+		},
+		{
+			name:       "first matching rule takes precedence",
+			socketPath: "/tmp/test.sock",
+			config: &config.SocketConfig{
+				Rules: config.RuleSet{
+					ACLs: []config.Rule{
+						{
+							Match:  config.Match{Path: "/test", Method: "GET"},
+							Action: "allow",
+						},
+						{
+							Match:  config.Match{Path: "/test", Method: "GET"},
+							Action: "deny",
+							Reason: "should not reach here",
+						},
+					},
+				},
+			},
+			request:    httptest.NewRequest("GET", "/test", nil),
+			want:       true,
+			wantReason: "",
 		},
 	}
 

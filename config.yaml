@@ -4,6 +4,12 @@ config:
 rules:
   acls:
     - match:
+        path: "/v1.*/networks"
+        method: "GET"
+      action: "allow"
+      reason: "Listing volumes is restricted"
+
+    - match:
         path: "/v1.*/volumes"
         method: "GET"
       action: "deny"

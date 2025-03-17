@@ -67,38 +67,60 @@ func (s *Server) UntrackSocket(path string) {
 }
 
 func (s *Server) Start() error {
-	if err := s.prepareSocket(); err != nil {
-		return err
-	}
+	log := logging.GetLogger()
 
-	// Set up signal handling
+	// Create signal channel
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-sigChan
-		log := logging.GetLogger()
-		log.Info("Shutdown signal received, cleaning up...")
-		s.Stop()
-		os.Exit(0)
-	}()
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
+	// Create context for shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Initialize the server
+	handler := NewManagementHandler(s.dockerSocket, s.socketConfigs, &s.configMu)
 	listener, err := net.Listen("unix", s.managementSocket)
 	if err != nil {
-		return fmt.Errorf("failed to create listener: %v", err)
+		return fmt.Errorf("failed to create listener: %w", err)
 	}
 
-	handler := NewManagementHandler(s.dockerSocket, s.socketConfigs, &s.configMu)
 	s.server = &http.Server{
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := context.WithValue(r.Context(), serverContextKey, s)
-			handler.ServeHTTP(w, r.WithContext(ctx))
-		}),
+		Handler: handler,
 	}
 
-	log := logging.GetLogger()
-	log.Info("Management server listening on socket", "path", s.managementSocket)
+	// Start server
+	go func() {
+		if err := s.server.Serve(listener); err != http.ErrServerClosed {
+			log.Error("Server error", "error", err)
+		}
+	}()
 
-	return s.server.Serve(listener)
+	log.Info("Management server started", "socket", s.managementSocket)
+
+	// Wait for shutdown signal
+	<-sigChan
+	log.Info("Shutting down server...")
+
+	// Cleanup all created sockets
+	s.socketMu.Lock()
+	for _, socketPath := range s.createdSockets {
+		if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
+			log.Error("Failed to remove socket", "path", socketPath, "error", err)
+		}
+	}
+	s.socketMu.Unlock()
+
+	// Remove management socket
+	if err := os.Remove(s.managementSocket); err != nil && !os.IsNotExist(err) {
+		log.Error("Failed to remove management socket", "error", err)
+	}
+
+	// Shutdown server
+	if err := s.server.Shutdown(ctx); err != nil {
+		return fmt.Errorf("error shutting down server: %w", err)
+	}
+
+	return nil
 }
 
 func (s *Server) Stop() {
@@ -106,13 +128,6 @@ func (s *Server) Stop() {
 		s.server.Shutdown(context.Background())
 	}
 	s.cleanup()
-}
-
-func (s *Server) prepareSocket() error {
-	if err := os.Remove(s.managementSocket); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to remove existing socket: %v", err)
-	}
-	return nil
 }
 
 func (s *Server) cleanup() {

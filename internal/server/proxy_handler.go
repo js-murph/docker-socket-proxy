@@ -91,18 +91,33 @@ func (h *ProxyHandler) checkACLRules(socketPath string, r *http.Request) (bool, 
 	h.configMu.RUnlock()
 
 	if !exists || config == nil {
-		return true, "" // No config
+		return true, "" // No config means allow
 	}
 
-	// Check each rule
+	log := logging.GetLogger()
+	defaultAction := "deny" // Default to deny if no rules match
+
+	// Process rules in order
 	for _, rule := range config.Rules.ACLs {
 		if matchesRule(r, rule.Match) {
-			if rule.Action == "deny" {
+			log.Debug("ACL rule matched",
+				"path", r.URL.Path,
+				"method", r.Method,
+				"action", rule.Action)
+
+			switch rule.Action {
+			case "allow":
+				return true, ""
+			case "deny":
 				return false, rule.Reason
 			}
 		}
 	}
 
+	// No rules matched, use default action
+	if defaultAction == "deny" {
+		return false, "No matching allow rules"
+	}
 	return true, ""
 }
 

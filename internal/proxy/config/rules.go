@@ -103,6 +103,11 @@ func validateACLRule(i int, rule Rule) error {
 		return fmt.Errorf("rule %d: path must start with '/', got '%s'", i, rule.Match.Path)
 	}
 
+	// Require reason for deny rules
+	if rule.Action == "deny" && rule.Reason == "" {
+		return fmt.Errorf("rule %d: deny rules must specify a reason", i)
+	}
+
 	return nil
 }
 
