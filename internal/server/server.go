@@ -18,16 +18,21 @@ import (
 	"docker-socket-proxy/internal/logging"
 	"docker-socket-proxy/internal/management"
 	"docker-socket-proxy/internal/proxy/config"
+	"docker-socket-proxy/internal/storage"
 )
 
 type Server struct {
 	managementSocket string
 	dockerSocket     string
+	socketDir        string
 	server           *http.Server
 	socketConfigs    map[string]*config.SocketConfig
 	configMu         sync.RWMutex
 	createdSockets   []string // Track created socket paths
 	socketMu         sync.RWMutex
+	store            *storage.FileStore
+	proxyServers     map[string]*http.Server // Track proxy servers
+	proxyMu          sync.RWMutex
 }
 
 type contextKey string
@@ -35,16 +40,105 @@ type contextKey string
 const serverContextKey contextKey = "server"
 
 func New(paths *management.SocketPaths) *Server {
+	log := logging.GetLogger()
+	log.Debug("Initializing server",
+		"management", paths.Management,
+		"docker", paths.Docker,
+		"socketDir", paths.SocketDir)
+
 	if err := paths.Validate(); err != nil {
 		panic(fmt.Sprintf("invalid socket paths: %v", err))
 	}
 
-	return &Server{
+	store := storage.NewFileStore(paths.SocketDir)
+	configs, err := store.LoadExistingConfigs()
+	if err != nil {
+		panic(fmt.Sprintf("failed to load existing configs: %v", err))
+	}
+	log.Debug("Loaded existing configs", "count", len(configs))
+
+	srv := &Server{
 		managementSocket: paths.Management,
 		dockerSocket:     paths.Docker,
-		socketConfigs:    make(map[string]*config.SocketConfig),
+		socketDir:        paths.SocketDir,
+		socketConfigs:    configs,
 		createdSockets:   make([]string, 0),
+		store:            store,
+		proxyServers:     make(map[string]*http.Server),
 	}
+
+	// Log each config found
+	for socketPath, _ := range configs {
+		log.Debug("Found existing config", "socket", socketPath)
+	}
+
+	// Recreate sockets for existing configs
+	for socketPath, socketConfig := range configs {
+		log.Debug("Attempting to recreate socket", "path", socketPath)
+		if err := srv.recreateSocket(socketPath, socketConfig); err != nil {
+			log.Error("Failed to recreate socket",
+				"path", socketPath,
+				"error", err)
+			delete(configs, socketPath)
+			store.DeleteConfig(socketPath)
+		}
+	}
+
+	return srv
+}
+
+func (s *Server) recreateSocket(socketPath string, cfg *config.SocketConfig) error {
+	log := logging.GetLogger()
+	log.Debug("Recreating socket",
+		"path", socketPath,
+		"config", fmt.Sprintf("%+v", cfg))
+
+	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove existing socket: %v", err)
+	}
+
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		return fmt.Errorf("failed to create socket listener: %v", err)
+	}
+
+	// Set socket permissions to be accessible by all users
+	if err := os.Chmod(socketPath, 0666); err != nil {
+		log.Error("Failed to set socket permissions", "error", err)
+	}
+
+	handler := NewProxyHandler(s.dockerSocket, s.socketConfigs, &s.configMu)
+	server := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			handler.ServeHTTP(w, r, socketPath)
+		}),
+	}
+
+	s.proxyMu.Lock()
+	s.proxyServers[socketPath] = server
+	s.proxyMu.Unlock()
+
+	go func() {
+		log.Debug("Starting proxy server", "socket", socketPath)
+		if err := server.Serve(listener); err != http.ErrServerClosed {
+			log.Error("Proxy server error", "error", err, "socket", socketPath)
+
+			// Attempt to recreate the socket on failure
+			s.proxyMu.Lock()
+			delete(s.proxyServers, socketPath)
+			s.proxyMu.Unlock()
+
+			if err := s.recreateSocket(socketPath, cfg); err != nil {
+				log.Error("Failed to recreate socket after error",
+					"path", socketPath,
+					"error", err)
+			}
+		}
+	}()
+
+	s.TrackSocket(socketPath)
+	log.Info("Socket recreated successfully", "path", socketPath)
+	return nil
 }
 
 // TrackSocket adds a socket path to the list of created sockets
@@ -67,6 +161,9 @@ func (s *Server) UntrackSocket(path string) {
 }
 
 func (s *Server) Start() error {
+	log := logging.GetLogger()
+	log.Debug("Starting server")
+
 	if err := s.prepareSocket(); err != nil {
 		return err
 	}
@@ -76,7 +173,6 @@ func (s *Server) Start() error {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-sigChan
-		log := logging.GetLogger()
 		log.Info("Shutdown signal received, cleaning up...")
 		s.Stop()
 		os.Exit(0)
@@ -87,7 +183,7 @@ func (s *Server) Start() error {
 		return fmt.Errorf("failed to create listener: %v", err)
 	}
 
-	handler := NewManagementHandler(s.dockerSocket, s.socketConfigs, &s.configMu)
+	handler := NewManagementHandler(s.dockerSocket, s.socketConfigs, &s.configMu, s.store)
 	s.server = &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := context.WithValue(r.Context(), serverContextKey, s)
@@ -95,8 +191,8 @@ func (s *Server) Start() error {
 		}),
 	}
 
-	log := logging.GetLogger()
 	log.Info("Management server listening on socket", "path", s.managementSocket)
+	log.Debug("Active proxy sockets", "count", len(s.createdSockets))
 
 	return s.server.Serve(listener)
 }
@@ -105,6 +201,14 @@ func (s *Server) Stop() {
 	if s.server != nil {
 		s.server.Shutdown(context.Background())
 	}
+
+	// Shutdown all proxy servers
+	s.proxyMu.Lock()
+	for _, server := range s.proxyServers {
+		server.Shutdown(context.Background())
+	}
+	s.proxyMu.Unlock()
+
 	s.cleanup()
 }
 
@@ -131,6 +235,11 @@ func (s *Server) cleanup() {
 	}
 	s.createdSockets = nil
 	s.socketMu.Unlock()
+
+	// Clear proxy servers
+	s.proxyMu.Lock()
+	s.proxyServers = make(map[string]*http.Server)
+	s.proxyMu.Unlock()
 }
 
 func matchesRule(r *http.Request, match config.Match) bool {

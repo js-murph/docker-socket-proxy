@@ -31,8 +31,23 @@ func NewProxyHandler(dockerSocket string, configs map[string]*config.SocketConfi
 
 func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, socketPath string) {
 	log := logging.GetLogger()
+	log.Debug("Received proxy request",
+		"method", r.Method,
+		"path", r.URL.Path,
+		"socket", socketPath)
 
-	if allowed, reason := h.checkACLRules(socketPath, r); !allowed {
+	h.configMu.RLock()
+	config, exists := h.configs[socketPath]
+	h.configMu.RUnlock()
+
+	if !exists {
+		log.Error("No configuration found for socket", "socket", socketPath)
+		http.Error(w, "Socket configuration not found", http.StatusInternalServerError)
+		return
+	}
+
+	allowed, reason := h.checkACLRules(socketPath, r)
+	if !allowed {
 		log.Info("Request denied by ACL",
 			"method", r.Method,
 			"path", r.URL.Path,
@@ -40,10 +55,6 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, socketP
 		http.Error(w, reason, http.StatusForbidden)
 		return
 	}
-
-	h.configMu.RLock()
-	config := h.configs[socketPath]
-	h.configMu.RUnlock()
 
 	// Apply both propagation and rewrite rules
 	if config != nil {
@@ -70,10 +81,12 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, socketP
 		}
 	}
 
+	// Create the reverse proxy
 	proxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
 			req.URL.Scheme = "http"
-			req.URL.Host = "unix-socket"
+			req.URL.Host = h.dockerSocket
+			req.Host = h.dockerSocket
 		},
 		Transport: &http.Transport{
 			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
@@ -81,6 +94,11 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, socketP
 			},
 		},
 	}
+
+	log.Debug("Proxying request",
+		"method", r.Method,
+		"path", r.URL.Path,
+		"to", h.dockerSocket)
 
 	proxy.ServeHTTP(w, r)
 }

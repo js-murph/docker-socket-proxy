@@ -2,9 +2,9 @@ package server
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +16,7 @@ import (
 
 	"docker-socket-proxy/internal/management"
 	"docker-socket-proxy/internal/proxy/config"
+	"docker-socket-proxy/internal/storage"
 )
 
 func TestServer(t *testing.T) {
@@ -28,13 +29,43 @@ func TestServer(t *testing.T) {
 	paths := &management.SocketPaths{
 		Management: filepath.Join(tmpDir, "mgmt.sock"),
 		Docker:     filepath.Join(tmpDir, "docker.sock"),
+		SocketDir:  tmpDir,
+	}
+
+	// Create a test socket and its config
+	testSocket := filepath.Join(tmpDir, "test.sock")
+
+	// Create the socket file
+	l, err := net.Listen("unix", testSocket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.Close()
+
+	testConfig := &config.SocketConfig{
+		Rules: config.RuleSet{
+			ACLs: []config.Rule{
+				{
+					Match:  config.Match{Path: "/test", Method: "GET"},
+					Action: "allow",
+				},
+			},
+		},
+	}
+
+	store := storage.NewFileStore(paths.Management)
+	if err := store.SaveConfig(testSocket, testConfig); err != nil {
+		t.Fatal(err)
 	}
 
 	srv := New(paths)
 
-	// Create context with cancel for clean shutdown
-	_, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// Verify config was loaded
+	if cfg, ok := srv.socketConfigs[testSocket]; !ok {
+		t.Error("Expected test config to be loaded")
+	} else if !reflect.DeepEqual(cfg, testConfig) {
+		t.Errorf("Loaded config doesn't match saved config.\nGot: %+v\nWant: %+v", cfg, testConfig)
+	}
 
 	// Start server with error channel
 	errCh := make(chan error, 1)
@@ -51,7 +82,6 @@ func TestServer(t *testing.T) {
 	}
 
 	// Clean shutdown
-	cancel()
 	srv.Stop()
 
 	// Check for server errors
@@ -67,7 +97,8 @@ func TestServer(t *testing.T) {
 
 func TestManagementHandler(t *testing.T) {
 	configs := make(map[string]*config.SocketConfig)
-	handler := NewManagementHandler("/tmp/docker.sock", configs, &sync.RWMutex{})
+	store := storage.NewFileStore("/tmp/mgmt.sock")
+	handler := NewManagementHandler("/tmp/docker.sock", configs, &sync.RWMutex{}, store)
 
 	t.Run("create socket", func(t *testing.T) {
 		config := &config.SocketConfig{

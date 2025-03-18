@@ -13,6 +13,7 @@ import (
 
 	"docker-socket-proxy/internal/logging"
 	"docker-socket-proxy/internal/proxy/config"
+	"docker-socket-proxy/internal/storage"
 
 	"github.com/google/uuid"
 )
@@ -24,15 +25,17 @@ type ManagementHandler struct {
 	proxyHandler  *ProxyHandler
 	servers       map[string]*http.Server
 	serverMu      sync.RWMutex
+	store         *storage.FileStore
 }
 
-func NewManagementHandler(dockerSocket string, configs map[string]*config.SocketConfig, mu *sync.RWMutex) *ManagementHandler {
+func NewManagementHandler(dockerSocket string, configs map[string]*config.SocketConfig, mu *sync.RWMutex, store *storage.FileStore) *ManagementHandler {
 	return &ManagementHandler{
 		dockerSocket:  dockerSocket,
 		socketConfigs: configs,
 		configMu:      mu,
 		proxyHandler:  NewProxyHandler(dockerSocket, configs, mu),
 		servers:       make(map[string]*http.Server),
+		store:         store,
 	}
 }
 
@@ -48,8 +51,8 @@ func (h *ManagementHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // generateSocketPath creates a unique socket path in the system's temp directory
-func generateSocketPath() string {
-	return filepath.Join(os.TempDir(), fmt.Sprintf("docker-proxy-%s.sock", uuid.New().String()))
+func generateSocketPath(socketDir string) string {
+	return filepath.Join(socketDir, fmt.Sprintf("docker-proxy-%s.sock", uuid.New().String()))
 }
 
 func (h *ManagementHandler) validateAndDecodeConfig(r *http.Request) (*config.SocketConfig, error) {
@@ -79,14 +82,27 @@ func (h *ManagementHandler) handleCreateSocket(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	socketPath := generateSocketPath()
+	s, ok := r.Context().Value(serverContextKey).(*Server)
+	if !ok {
+		http.Error(w, "Server context not found", http.StatusInternalServerError)
+		return
+	}
+
+	socketPath := generateSocketPath(s.socketDir)
 	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
 		http.Error(w, fmt.Sprintf("failed to remove existing socket: %v", err), http.StatusInternalServerError)
 		return
 	}
 
+	// Save config before creating socket
+	if err := h.store.SaveConfig(socketPath, socketConfig); err != nil {
+		http.Error(w, fmt.Sprintf("failed to save config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
+		h.store.DeleteConfig(socketPath) // Cleanup config if socket creation fails
 		http.Error(w, fmt.Sprintf("failed to create socket listener: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -123,7 +139,7 @@ func (h *ManagementHandler) handleCreateSocket(w http.ResponseWriter, r *http.Re
 func (h *ManagementHandler) handleDeleteSocket(w http.ResponseWriter, r *http.Request) {
 	socketPath := r.Header.Get("Socket-Path")
 	if socketPath == "" {
-		http.Error(w, "Socket-Path header required", http.StatusBadRequest)
+		http.Error(w, "Socket-Path header is required", http.StatusBadRequest)
 		return
 	}
 
@@ -134,16 +150,20 @@ func (h *ManagementHandler) handleDeleteSocket(w http.ResponseWriter, r *http.Re
 	}
 	h.serverMu.Unlock()
 
-	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
-		http.Error(w, fmt.Sprintf("failed to delete socket: %v", err), http.StatusInternalServerError)
-		return
-	}
-
 	h.configMu.Lock()
 	delete(h.socketConfigs, socketPath)
 	h.configMu.Unlock()
 
-	// Untrack the deleted socket
+	if err := h.store.DeleteConfig(socketPath); err != nil {
+		log := logging.GetLogger()
+		log.Error("Failed to delete config file", "error", err)
+	}
+
+	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
+		http.Error(w, fmt.Sprintf("failed to remove socket: %v", err), http.StatusInternalServerError)
+		return
+	}
+
 	if s, ok := r.Context().Value(serverContextKey).(*Server); ok {
 		s.UntrackSocket(socketPath)
 	}

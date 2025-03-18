@@ -6,17 +6,26 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"docker-socket-proxy/internal/proxy/config"
+	"docker-socket-proxy/internal/storage"
+	"path/filepath"
 )
 
 func TestManagementHandler_CreateSocket(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "docker-proxy-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
 	configs := make(map[string]*config.SocketConfig)
-	handler := NewManagementHandler("/tmp/docker.sock", configs, &sync.RWMutex{})
+	store := storage.NewFileStore(filepath.Join(tmpDir, "mgmt.sock"))
+	handler := NewManagementHandler("/tmp/docker.sock", configs, &sync.RWMutex{}, store)
 	defer handler.Cleanup()
 
 	tests := []struct {
@@ -67,15 +76,16 @@ func TestManagementHandler_CreateSocket(t *testing.T) {
 					t.Error("expected socket path in response")
 				}
 
-				// Wait for the socket to be ready
-				for i := 0; i < 10; i++ {
-					if _, err := os.Stat(socketPath); err == nil {
-						break
-					}
-					time.Sleep(50 * time.Millisecond)
+				// Verify config was persisted
+				cfg, err := store.LoadConfig(socketPath)
+				if err != nil {
+					t.Errorf("failed to load config: %v", err)
+				}
+				if !reflect.DeepEqual(cfg, tt.config) {
+					t.Error("stored config doesn't match original")
 				}
 
-				// Verify the socket exists
+				// Verify socket exists
 				if _, err := os.Stat(socketPath); err != nil {
 					t.Errorf("socket file not created: %v", err)
 				}
@@ -86,7 +96,8 @@ func TestManagementHandler_CreateSocket(t *testing.T) {
 
 func TestManagementHandler_DeleteSocket(t *testing.T) {
 	configs := make(map[string]*config.SocketConfig)
-	handler := NewManagementHandler("/tmp/docker.sock", configs, &sync.RWMutex{})
+	store := storage.NewFileStore("/tmp/mgmt.sock")
+	handler := NewManagementHandler("/tmp/docker.sock", configs, &sync.RWMutex{}, store)
 
 	tests := []struct {
 		name       string
