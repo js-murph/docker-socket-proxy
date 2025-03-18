@@ -16,6 +16,7 @@ import (
 	"docker-socket-proxy/internal/storage"
 
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 )
 
 type ManagementHandler struct {
@@ -49,6 +50,8 @@ func (h *ManagementHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleDeleteSocket(w, r)
 	case r.Method == "GET" && r.URL.Path == "/list-sockets":
 		h.handleListSockets(w, r)
+	case r.Method == "GET" && r.URL.Path == "/describe-socket":
+		h.handleDescribeSocket(w, r)
 	default:
 		log.Error("Unknown request", "method", r.Method, "path", r.URL.Path)
 		http.Error(w, "Not found", http.StatusNotFound)
@@ -270,6 +273,67 @@ func (h *ManagementHandler) handleListSockets(w http.ResponseWriter, r *http.Req
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
+}
+
+func (h *ManagementHandler) handleDescribeSocket(w http.ResponseWriter, r *http.Request) {
+	log := logging.GetLogger()
+
+	// Get the socket name from the query parameters
+	socketName := r.URL.Query().Get("socket")
+	if socketName == "" {
+		http.Error(w, "socket name is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get the server from the context to get the socket directory
+	var socketPath string
+	if srv, ok := r.Context().Value(serverContextKey).(*Server); ok {
+		// If the socket name doesn't contain a directory separator,
+		// assume it's relative to the socket directory
+		if !strings.Contains(socketName, "/") {
+			socketPath = filepath.Join(srv.socketDir, socketName)
+		} else {
+			socketPath = socketName
+		}
+	} else {
+		// Try to get the default socket directory
+		socketDir := "/var/run/docker-proxy"
+		if envDir := os.Getenv("DOCKER_PROXY_SOCKET_DIR"); envDir != "" {
+			socketDir = envDir
+		}
+		socketPath = filepath.Join(socketDir, socketName)
+	}
+
+	log.Info("Describing socket", "path", socketPath)
+
+	// Check if the socket exists in our config map
+	h.configMu.RLock()
+	config, exists := h.socketConfigs[socketPath]
+	h.configMu.RUnlock()
+
+	if !exists {
+		// Try to load from the file store
+		var err error
+		config, err = h.store.LoadConfig(socketPath)
+		if err != nil {
+			log.Error("Failed to load config", "error", err)
+			http.Error(w, fmt.Sprintf("socket %s not found or has no configuration", socketName), http.StatusNotFound)
+			return
+		}
+	}
+
+	// Convert the config to YAML
+	yamlData, err := yaml.Marshal(config)
+	if err != nil {
+		log.Error("Failed to marshal config to YAML", "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Set content type and return the YAML
+	w.Header().Set("Content-Type", "application/yaml")
+	w.WriteHeader(http.StatusOK)
+	w.Write(yamlData)
 }
 
 func (h *ManagementHandler) Cleanup() {

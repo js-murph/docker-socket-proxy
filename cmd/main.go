@@ -71,7 +71,16 @@ func main() {
 		},
 	}
 
-	socketCmd.AddCommand(createCmd, deleteCmd, listCmd)
+	var describeCmd = &cobra.Command{
+		Use:   "describe [socket-name]",
+		Short: "Show configuration for a Docker proxy socket",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			cli.RunDescribe(cmd, args, paths)
+		},
+	}
+
+	socketCmd.AddCommand(createCmd, deleteCmd, listCmd, describeCmd)
 	rootCmd.AddCommand(daemonCmd, socketCmd)
 
 	var logLevel string
