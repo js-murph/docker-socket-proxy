@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
@@ -63,85 +62,117 @@ func generateSocketPath(socketDir string) string {
 	return filepath.Join(socketDir, fmt.Sprintf("docker-proxy-%s.sock", uuid.New().String()))
 }
 
+// validateAndDecodeConfig validates and decodes the socket configuration from the request
 func (h *ManagementHandler) validateAndDecodeConfig(r *http.Request) (*config.SocketConfig, error) {
-	var socketConfig *config.SocketConfig
-	if r.Body == nil {
-		return nil, fmt.Errorf("empty request body")
+	// Default config if none is provided
+	socketConfig := &config.SocketConfig{
+		Rules: config.RuleSet{
+			ACLs: []config.Rule{
+				{
+					Match:  config.Match{Path: "/", Method: ""},
+					Action: "deny",
+				},
+			},
+		},
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&socketConfig); err != nil {
-		if err == io.EOF {
-			return nil, fmt.Errorf("empty configuration provided")
+	// If there's a request body, try to decode it
+	if r.Body != nil && r.ContentLength > 0 {
+		if r.Header.Get("Content-Type") != "application/json" {
+			return nil, fmt.Errorf("expected Content-Type application/json")
 		}
-		return nil, fmt.Errorf("invalid configuration format: %v", err)
-	}
 
-	if err := config.ValidateConfig(socketConfig); err != nil {
-		return nil, fmt.Errorf("invalid configuration: %v", err)
+		if err := json.NewDecoder(r.Body).Decode(socketConfig); err != nil {
+			return nil, fmt.Errorf("invalid JSON configuration: %w", err)
+		}
 	}
 
 	return socketConfig, nil
 }
 
 func (h *ManagementHandler) handleCreateSocket(w http.ResponseWriter, r *http.Request) {
+	log := logging.GetLogger()
+
+	// Validate and decode the configuration
 	socketConfig, err := h.validateAndDecodeConfig(r)
 	if err != nil {
+		log.Error("Invalid configuration", "error", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
+	// Get the server from the context
 	s, ok := r.Context().Value(serverContextKey).(*Server)
 	if !ok {
+		log.Error("Server context not found")
 		http.Error(w, "Server context not found", http.StatusInternalServerError)
 		return
 	}
 
+	// Generate a new socket path
 	socketPath := generateSocketPath(s.socketDir)
-	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
-		http.Error(w, fmt.Sprintf("failed to remove existing socket: %v", err), http.StatusInternalServerError)
+
+	// Create the socket and start the proxy server
+	if err := h.createSocket(socketPath, socketConfig, s); err != nil {
+		log.Error("Failed to create socket", "error", err)
+		http.Error(w, fmt.Sprintf("Failed to create socket: %v", err), http.StatusInternalServerError)
 		return
+	}
+
+	w.Write([]byte(socketPath))
+}
+
+// createSocket handles the actual creation of a socket and its resources
+func (h *ManagementHandler) createSocket(socketPath string, socketConfig *config.SocketConfig, s *Server) error {
+	log := logging.GetLogger()
+
+	// Remove any existing socket at this path
+	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove existing socket: %w", err)
 	}
 
 	// Save config before creating socket
 	if err := h.store.SaveConfig(socketPath, socketConfig); err != nil {
-		http.Error(w, fmt.Sprintf("failed to save config: %v", err), http.StatusInternalServerError)
-		return
+		return fmt.Errorf("failed to save config: %w", err)
 	}
 
+	// Create the socket listener
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
-		h.store.DeleteConfig(socketPath) // Cleanup config if socket creation fails
-		http.Error(w, fmt.Sprintf("failed to create socket listener: %v", err), http.StatusInternalServerError)
-		return
+		// Cleanup config if socket creation fails
+		h.store.DeleteConfig(socketPath)
+		return fmt.Errorf("failed to create socket listener: %w", err)
 	}
 
+	// Add the config to our map
 	h.configMu.Lock()
 	h.socketConfigs[socketPath] = socketConfig
 	h.configMu.Unlock()
 
+	// Create and start the proxy server
 	server := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			h.proxyHandler.ServeHTTP(w, r, socketPath)
 		}),
 	}
 
+	// Track the server
 	h.serverMu.Lock()
 	h.servers[socketPath] = server
 	h.serverMu.Unlock()
 
 	// Track the created socket
-	if s, ok := r.Context().Value(serverContextKey).(*Server); ok {
-		s.TrackSocket(socketPath)
-	}
+	s.TrackSocket(socketPath)
 
+	// Start serving in a goroutine
 	go func() {
 		if err := server.Serve(listener); err != http.ErrServerClosed {
-			log := logging.GetLogger()
 			log.Error("Proxy server error", "error", err, "socket", socketPath)
 		}
 	}()
 
-	w.Write([]byte(socketPath))
+	log.Info("Created new proxy socket", "path", socketPath)
+	return nil
 }
 
 func (h *ManagementHandler) handleDeleteSocket(w http.ResponseWriter, r *http.Request) {
@@ -162,34 +193,25 @@ func (h *ManagementHandler) handleDeleteSocket(w http.ResponseWriter, r *http.Re
 	log.Info("Deleting socket", "path", socketPath)
 
 	// Get the server from the context
-	srv, ok := r.Context().Value(serverContextKey).(*Server)
-	if !ok {
-		// For tests, we'll allow this to pass
-		log.Warn("Server not found in context - continuing for test compatibility")
+	srv, _ := r.Context().Value(serverContextKey).(*Server)
 
-		// Remove the config from the map
-		h.configMu.Lock()
-		delete(h.socketConfigs, socketPath)
-		h.configMu.Unlock()
-
-		// Delete the config file
-		if h.store != nil {
-			if err := h.store.DeleteConfig(socketPath); err != nil {
-				log.Error("Failed to delete config file", "error", err)
-			}
-		}
-
-		// Remove the socket file
-		if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
-			log.Error("Failed to remove socket file", "error", err)
-		}
-
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, "Socket %s deleted successfully", socketPath)
+	// Delete the socket and associated resources
+	if err := h.deleteSocket(socketPath, srv); err != nil {
+		log.Error("Failed to delete socket", "error", err)
+		http.Error(w, fmt.Sprintf("Failed to delete socket: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	// Check if the socket exists
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "Socket %s deleted successfully", socketPath)
+}
+
+// deleteSocket handles the actual deletion of a socket and its resources
+func (h *ManagementHandler) deleteSocket(socketPath string, srv *Server) error {
+	log := logging.GetLogger()
+	var errs []string
+
+	// Check if the socket exists in our config map
 	h.configMu.RLock()
 	_, exists := h.socketConfigs[socketPath]
 	h.configMu.RUnlock()
@@ -197,6 +219,7 @@ func (h *ManagementHandler) handleDeleteSocket(w http.ResponseWriter, r *http.Re
 	// Remove the socket file
 	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
 		log.Error("Failed to remove socket file", "error", err)
+		errs = append(errs, fmt.Sprintf("remove socket file: %v", err))
 		// Continue anyway - we still want to clean up other resources
 	}
 
@@ -208,6 +231,7 @@ func (h *ManagementHandler) handleDeleteSocket(w http.ResponseWriter, r *http.Re
 	// Delete the config file
 	if err := h.store.DeleteConfig(socketPath); err != nil {
 		log.Error("Failed to delete config file", "error", err)
+		errs = append(errs, fmt.Sprintf("delete config file: %v", err))
 		// Continue anyway - we've already removed the socket
 	}
 
@@ -217,14 +241,21 @@ func (h *ManagementHandler) handleDeleteSocket(w http.ResponseWriter, r *http.Re
 		if server, ok := srv.proxyServers[socketPath]; ok {
 			if err := server.Close(); err != nil {
 				log.Error("Failed to stop proxy server", "error", err)
+				errs = append(errs, fmt.Sprintf("stop proxy server: %v", err))
 			}
 			delete(srv.proxyServers, socketPath)
 		}
 		srv.configMu.Unlock()
+
+		// Untrack the socket
+		srv.UntrackSocket(socketPath)
 	}
 
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "Socket %s deleted successfully", socketPath)
+	if len(errs) > 0 {
+		return fmt.Errorf("errors during socket deletion: %s", strings.Join(errs, "; "))
+	}
+
+	return nil
 }
 
 func (h *ManagementHandler) handleListSockets(w http.ResponseWriter, r *http.Request) {

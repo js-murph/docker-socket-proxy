@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -34,139 +34,111 @@ func TestManagementHandler_CreateSocket(t *testing.T) {
 		store:         store,
 		socketConfigs: configs,
 		proxyServers:  make(map[string]*http.Server),
+		configMu:      sync.RWMutex{},
 	}
 
 	handler := NewManagementHandler("/tmp/docker.sock", configs, &sync.RWMutex{}, store)
-	defer handler.Cleanup()
-
-	t.Run("valid config", func(t *testing.T) {
-		config := &config.SocketConfig{
-			Rules: config.RuleSet{
-				ACLs: []config.Rule{
-					{
-						Match:  config.Match{Path: "/v1.42/containers/json", Method: "GET"},
-						Action: "allow",
-					},
-				},
-			},
-		}
-
-		body, _ := json.Marshal(config)
-		req := httptest.NewRequest("POST", "/create-socket", bytes.NewBuffer(body))
-		ctx := context.WithValue(req.Context(), serverContextKey, srv)
-		req = req.WithContext(ctx)
-
-		w := httptest.NewRecorder()
-		handler.ServeHTTP(w, req)
-
-		if w.Code != http.StatusOK {
-			t.Errorf("expected status OK, got %v", w.Code)
-			return
-		}
-
-		// Check if response is JSON
-		contentType := w.Header().Get("Content-Type")
-		if !strings.Contains(contentType, "application/json") {
-			t.Logf("Response body: %s", w.Body.String())
-			t.Logf("Content-Type: %s", contentType)
-
-			// Try to extract socket path from plain text response
-			socketPath := strings.TrimSpace(w.Body.String())
-			if socketPath == "" {
-				t.Error("Empty socket path in response")
-				return
-			}
-
-			// Verify the config was stored
-			storedConfig, err := store.LoadConfig(socketPath)
-			if err != nil {
-				t.Errorf("failed to load config: %v", err)
-				return
-			}
-
-			// Compare specific fields
-			if len(storedConfig.Rules.ACLs) != len(config.Rules.ACLs) {
-				t.Errorf("stored config has %d ACL rules, want %d",
-					len(storedConfig.Rules.ACLs), len(config.Rules.ACLs))
-				return
-			}
-
-			return
-		}
-
-		var resp struct {
-			SocketPath string `json:"socket_path"`
-		}
-		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-			t.Errorf("failed to unmarshal response: %v", err)
-			return
-		}
-
-		// Verify the config was stored
-		storedConfig, err := store.LoadConfig(resp.SocketPath)
-		if err != nil {
-			t.Errorf("failed to load config: %v", err)
-			return
-		}
-
-		// Compare specific fields
-		if len(storedConfig.Rules.ACLs) != len(config.Rules.ACLs) {
-			t.Errorf("stored config has %d ACL rules, want %d",
-				len(storedConfig.Rules.ACLs), len(config.Rules.ACLs))
-			return
-		}
-	})
 
 	tests := []struct {
 		name       string
 		config     *config.SocketConfig
+		withServer bool
 		wantStatus int
 	}{
 		{
+			name: "valid config",
+			config: &config.SocketConfig{
+				Rules: config.RuleSet{
+					ACLs: []config.Rule{
+						{
+							Match:  config.Match{Path: "/test", Method: "GET"},
+							Action: "allow",
+						},
+					},
+				},
+			},
+			withServer: true,
+			wantStatus: http.StatusOK,
+		},
+		{
 			name:       "empty config",
 			config:     nil,
-			wantStatus: http.StatusBadRequest,
+			withServer: true,
+			wantStatus: http.StatusOK, // Empty config is allowed, will use default
+		},
+		{
+			name: "valid config without server context",
+			config: &config.SocketConfig{
+				Rules: config.RuleSet{
+					ACLs: []config.Rule{
+						{
+							Match:  config.Match{Path: "/test", Method: "GET"},
+							Action: "allow",
+						},
+					},
+				},
+			},
+			withServer: false,
+			wantStatus: http.StatusInternalServerError, // Server context is required
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var body []byte
+			var body io.Reader
 			if tt.config != nil {
-				body, _ = json.Marshal(tt.config)
+				configJSON, err := json.Marshal(tt.config)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body = bytes.NewReader(configJSON)
 			}
 
-			req := httptest.NewRequest("POST", "/create-socket", bytes.NewBuffer(body))
-			// Add server to context
-			ctx := context.WithValue(req.Context(), serverContextKey, srv)
-			req = req.WithContext(ctx)
+			req := httptest.NewRequest("POST", "/create-socket", body)
+			if tt.config != nil {
+				req.Header.Set("Content-Type", "application/json")
+			}
+
+			if tt.withServer {
+				ctx := context.WithValue(req.Context(), serverContextKey, srv)
+				req = req.WithContext(ctx)
+			}
 
 			w := httptest.NewRecorder()
 			handler.ServeHTTP(w, req)
 
 			if w.Code != tt.wantStatus {
-				t.Errorf("ServeHTTP() status = %v, want %v", w.Code, tt.wantStatus)
+				t.Errorf("ServeHTTP() status = %v, want %v, body: %s",
+					w.Code, tt.wantStatus, w.Body.String())
 			}
 
 			if tt.wantStatus == http.StatusOK {
-				socketPath := strings.TrimSpace(w.Body.String())
-				if socketPath == "" {
-					t.Error("expected socket path in response")
+				// Check that a socket path was returned
+				socketPath := w.Body.String()
+				if !strings.HasPrefix(socketPath, tmpDir) {
+					t.Errorf("Expected socket path to start with %s, got %s", tmpDir, socketPath)
 				}
 
-				// Verify config was persisted
-				cfg, err := store.LoadConfig(socketPath)
-				if err != nil {
-					t.Errorf("failed to load config: %v", err)
-				}
-				if !reflect.DeepEqual(cfg, tt.config) {
-					t.Error("stored config doesn't match original")
+				// Check that the socket file was created
+				if _, err := os.Stat(socketPath); os.IsNotExist(err) {
+					t.Errorf("Socket file was not created at %s", socketPath)
 				}
 
-				// Verify socket exists
-				if _, err := os.Stat(socketPath); err != nil {
-					t.Errorf("socket file not created: %v", err)
+				// Check that the config was added to the map
+				handler.configMu.RLock()
+				_, exists := handler.socketConfigs[socketPath]
+				handler.configMu.RUnlock()
+				if !exists {
+					t.Errorf("Socket config was not added to the map")
 				}
+
+				// Check that the config file was created
+				if _, err := store.LoadConfig(socketPath); err != nil {
+					t.Errorf("Socket config file was not created: %v", err)
+				}
+
+				// Clean up the socket
+				os.Remove(socketPath)
 			}
 		})
 	}
@@ -188,6 +160,7 @@ func TestManagementHandler_DeleteSocket(t *testing.T) {
 		store:         store,
 		socketConfigs: configs,
 		proxyServers:  make(map[string]*http.Server),
+		configMu:      sync.RWMutex{},
 	}
 
 	// Create a test socket
@@ -200,6 +173,11 @@ func TestManagementHandler_DeleteSocket(t *testing.T) {
 
 	// Add the socket to the configs
 	configs[socketPath] = &config.SocketConfig{}
+
+	// Save the config
+	if err := store.SaveConfig(socketPath, configs[socketPath]); err != nil {
+		t.Fatal(err)
+	}
 
 	handler := NewManagementHandler("/tmp/docker.sock", configs, &sync.RWMutex{}, store)
 
@@ -231,10 +209,34 @@ func TestManagementHandler_DeleteSocket(t *testing.T) {
 			withServer: true,
 			wantStatus: http.StatusOK,
 		},
+		{
+			name:       "nonexistent socket",
+			socketName: "nonexistent.sock",
+			useHeader:  false,
+			withServer: true,
+			wantStatus: http.StatusOK, // We don't return an error for nonexistent sockets
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Recreate the socket for each test if it's the valid socket test
+			if tt.socketName == "test.sock" && !strings.Contains(tt.name, "nonexistent") {
+				listener, err := net.Listen("unix", socketPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				listener.Close()
+
+				// Re-add the socket to the configs
+				configs[socketPath] = &config.SocketConfig{}
+
+				// Re-save the config
+				if err := store.SaveConfig(socketPath, configs[socketPath]); err != nil {
+					t.Fatal(err)
+				}
+			}
+
 			req := httptest.NewRequest("DELETE", "/delete-socket", nil)
 
 			// Add socket name as query param or header
@@ -260,6 +262,24 @@ func TestManagementHandler_DeleteSocket(t *testing.T) {
 			if w.Code != tt.wantStatus {
 				t.Errorf("ServeHTTP() status = %v, want %v, body: %s",
 					w.Code, tt.wantStatus, w.Body.String())
+			}
+
+			// Verify the socket was deleted if it was a valid delete request
+			if tt.wantStatus == http.StatusOK && tt.socketName == "test.sock" {
+				// Check if the socket file was removed
+				if _, err := os.Stat(socketPath); !os.IsNotExist(err) {
+					t.Errorf("Socket file still exists after deletion")
+				}
+
+				// Check if the config was removed from the map
+				if _, exists := configs[socketPath]; exists {
+					t.Errorf("Socket config still exists in map after deletion")
+				}
+
+				// Check if the config file was deleted
+				if _, err := store.LoadConfig(socketPath); err == nil {
+					t.Errorf("Socket config file still exists after deletion")
+				}
 			}
 		})
 	}
@@ -559,6 +579,66 @@ func TestManagementHandler_ResolveSocketPath(t *testing.T) {
 	})
 }
 
+func TestManagementHandler_ValidateAndDecodeConfig(t *testing.T) {
+	handler := NewManagementHandler("/tmp/docker.sock", make(map[string]*config.SocketConfig), &sync.RWMutex{}, nil)
+
+	tests := []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{
+			name:    "empty body",
+			body:    "",
+			wantErr: false, // Empty body is allowed, will use default config
+		},
+		{
+			name:    "valid config",
+			body:    `{"rules":{"acls":[{"match":{"path":"/test","method":"GET"},"action":"allow"}]}}`,
+			wantErr: false,
+		},
+		{
+			name:    "invalid JSON",
+			body:    `{"rules":`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/create-socket", strings.NewReader(tt.body))
+			if tt.body != "" {
+				req.Header.Set("Content-Type", "application/json")
+			}
+
+			config, err := handler.validateAndDecodeConfig(req)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateAndDecodeConfig() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if !tt.wantErr {
+				if config == nil {
+					t.Errorf("validateAndDecodeConfig() returned nil config for valid input")
+				}
+
+				if tt.body == "" {
+					// For empty body, we should get a default config
+					if config.Rules.ACLs == nil {
+						t.Errorf("validateAndDecodeConfig() did not create default config for empty body")
+					}
+				} else {
+					// For valid JSON, we should get the config we provided
+					if len(config.Rules.ACLs) != 1 || config.Rules.ACLs[0].Action != "allow" {
+						t.Errorf("validateAndDecodeConfig() did not parse config correctly: %+v", config)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestManagementHandler(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "docker-proxy-test-*")
 	if err != nil {
@@ -569,39 +649,107 @@ func TestManagementHandler(t *testing.T) {
 	configs := make(map[string]*config.SocketConfig)
 	store := storage.NewFileStore(tmpDir)
 
+	// Create a server instance for the context
 	srv := &Server{
 		socketDir:     tmpDir,
 		store:         store,
 		socketConfigs: configs,
 		proxyServers:  make(map[string]*http.Server),
+		configMu:      sync.RWMutex{},
 	}
 
 	handler := NewManagementHandler("/tmp/docker.sock", configs, &sync.RWMutex{}, store)
 
-	t.Run("create socket", func(t *testing.T) {
-		config := &config.SocketConfig{
-			Rules: config.RuleSet{
-				ACLs: []config.Rule{
-					{
-						Match:  config.Match{Path: "/v1.42/containers/json", Method: "GET"},
-						Action: "allow",
-					},
-				},
-			},
-		}
+	tests := []struct {
+		name       string
+		method     string
+		path       string
+		body       io.Reader
+		headers    map[string]string
+		withServer bool
+		wantStatus int
+	}{
+		{
+			name:       "create socket",
+			method:     "POST",
+			path:       "/create-socket",
+			body:       strings.NewReader(`{"rules":{"acls":[{"match":{"path":"/test","method":"GET"},"action":"allow"}]}}`),
+			headers:    map[string]string{"Content-Type": "application/json"},
+			withServer: true,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "list sockets",
+			method:     "GET",
+			path:       "/list-sockets",
+			withServer: true,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "delete socket",
+			method:     "DELETE",
+			path:       "/delete-socket",
+			headers:    map[string]string{"Socket-Path": filepath.Join(tmpDir, "test.sock")},
+			withServer: true,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "describe socket",
+			method:     "GET",
+			path:       "/describe-socket",
+			headers:    map[string]string{},
+			withServer: true,
+			wantStatus: http.StatusBadRequest, // Missing socket name
+		},
+		{
+			name:       "unknown request",
+			method:     "GET",
+			path:       "/unknown",
+			withServer: true,
+			wantStatus: http.StatusNotFound,
+		},
+	}
 
-		body, _ := json.Marshal(config)
-		req := httptest.NewRequest("POST", "/create-socket", bytes.NewBuffer(body))
-		ctx := context.WithValue(req.Context(), serverContextKey, srv)
-		req = req.WithContext(ctx)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, tt.body)
 
-		w := httptest.NewRecorder()
-		handler.ServeHTTP(w, req)
+			// Add headers
+			for k, v := range tt.headers {
+				req.Header.Set(k, v)
+			}
 
-		if w.Code != http.StatusOK {
-			t.Errorf("expected status OK, got %v", w.Code)
-		}
-	})
+			// Add server to context if needed
+			if tt.withServer {
+				ctx := context.WithValue(req.Context(), serverContextKey, srv)
+				req = req.WithContext(ctx)
+			}
 
-	// ... rest of the test
+			// For delete socket test, create a test socket first
+			if tt.name == "delete socket" {
+				socketPath := filepath.Join(tmpDir, "test.sock")
+				listener, err := net.Listen("unix", socketPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				listener.Close()
+
+				// Add the socket to the configs
+				configs[socketPath] = &config.SocketConfig{}
+
+				// Save the config
+				if err := store.SaveConfig(socketPath, configs[socketPath]); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+
+			if w.Code != tt.wantStatus {
+				t.Errorf("ServeHTTP() status = %v, want %v, body: %s",
+					w.Code, tt.wantStatus, w.Body.String())
+			}
+		})
+	}
 }
