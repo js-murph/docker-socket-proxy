@@ -178,3 +178,78 @@ func TestRunList(t *testing.T) {
 		t.Errorf("Expected output to contain socket names, got: %s", output)
 	}
 }
+
+func TestRunDescribe(t *testing.T) {
+	// Create a temporary directory for the test socket
+	tmpDir, err := os.MkdirTemp("", "docker-proxy-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create a mock Unix socket server
+	socketPath := filepath.Join(tmpDir, "test.sock")
+	l, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+
+	// Create a test server
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			t.Errorf("Expected GET request, got %s", r.Method)
+		}
+		if r.URL.Path != "/describe-socket" {
+			t.Errorf("Expected /describe-socket path, got %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("socket") != "test-socket.sock" {
+			t.Errorf("Expected socket query param to be test-socket.sock, got %s",
+				r.URL.Query().Get("socket"))
+		}
+
+		// Return a YAML config
+		w.Header().Set("Content-Type", "application/yaml")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`rules:
+  acls:
+  - match:
+      path: /test
+      method: GET
+    action: allow`))
+	}))
+	server.Listener = l
+	server.Start()
+	defer server.Close()
+
+	// Set up test command and arguments
+	cmd := &cobra.Command{}
+	args := []string{"test-socket.sock"}
+	paths := &management.SocketPaths{
+		Management: socketPath,
+	}
+
+	// Capture stdout
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	// Run the command
+	RunDescribe(cmd, args, paths)
+
+	// Restore stdout
+	w.Close()
+	os.Stdout = oldStdout
+
+	// Read captured output
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	// Check output
+	if !strings.Contains(output, "rules:") ||
+		!strings.Contains(output, "acls:") ||
+		!strings.Contains(output, "action: allow") {
+		t.Errorf("Expected output to contain YAML config, got: %s", output)
+	}
+}

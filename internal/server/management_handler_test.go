@@ -297,6 +297,129 @@ func TestManagementHandler_ListSockets(t *testing.T) {
 	})
 }
 
+func TestManagementHandler_DescribeSocket(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "docker-proxy-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	configs := make(map[string]*config.SocketConfig)
+	store := storage.NewFileStore(tmpDir)
+
+	// Create a server instance for the context
+	srv := &Server{
+		socketDir:     tmpDir,
+		store:         store,
+		socketConfigs: configs,
+		proxyServers:  make(map[string]*http.Server),
+	}
+
+	// Create a test socket config
+	socketPath := filepath.Join(tmpDir, "test.sock")
+	testConfig := &config.SocketConfig{
+		Rules: config.RuleSet{
+			ACLs: []config.Rule{
+				{
+					Match:  config.Match{Path: "/test", Method: "GET"},
+					Action: "allow",
+				},
+			},
+		},
+	}
+
+	// Save the config
+	if err := store.SaveConfig(socketPath, testConfig); err != nil {
+		t.Fatal(err)
+	}
+
+	// Add the config to the map
+	configs[socketPath] = testConfig
+
+	handler := NewManagementHandler("/tmp/docker.sock", configs, &sync.RWMutex{}, store)
+
+	tests := []struct {
+		name       string
+		socketName string
+		withServer bool
+		wantStatus int
+	}{
+		{
+			name:       "missing socket name",
+			socketName: "",
+			withServer: true,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "socket not found",
+			socketName: "nonexistent.sock",
+			withServer: true,
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:       "valid socket with server context",
+			socketName: "test.sock",
+			withServer: true,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "valid socket without server context",
+			socketName: filepath.Base(socketPath), // Use just the filename
+			withServer: false,
+			wantStatus: http.StatusOK,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/describe-socket", nil)
+
+			// Add query parameter
+			if tt.socketName != "" {
+				q := req.URL.Query()
+				q.Add("socket", tt.socketName)
+				req.URL.RawQuery = q.Encode()
+			}
+
+			// Add server to context if needed
+			if tt.withServer {
+				ctx := context.WithValue(req.Context(), serverContextKey, srv)
+				req = req.WithContext(ctx)
+			} else {
+				// For tests without server context, we need to set the socket directory
+				// in the environment so the handler can find the socket
+				oldEnv := os.Getenv("DOCKER_PROXY_SOCKET_DIR")
+				os.Setenv("DOCKER_PROXY_SOCKET_DIR", tmpDir)
+				defer os.Setenv("DOCKER_PROXY_SOCKET_DIR", oldEnv)
+			}
+
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+
+			if w.Code != tt.wantStatus {
+				t.Errorf("ServeHTTP() status = %v, want %v, body: %s",
+					w.Code, tt.wantStatus, w.Body.String())
+			}
+
+			if tt.wantStatus == http.StatusOK {
+				// Check that the response is YAML
+				contentType := w.Header().Get("Content-Type")
+				if contentType != "application/yaml" {
+					t.Errorf("Expected Content-Type application/yaml, got %s", contentType)
+				}
+
+				// Verify the YAML contains expected content
+				responseBody := w.Body.String()
+				if !strings.Contains(responseBody, "rules:") ||
+					!strings.Contains(responseBody, "acls:") ||
+					!strings.Contains(responseBody, "action: allow") {
+					t.Errorf("Response doesn't contain expected YAML content: %s", responseBody)
+				}
+			}
+		})
+	}
+}
+
 func TestManagementHandler(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "docker-proxy-test-*")
 	if err != nil {
