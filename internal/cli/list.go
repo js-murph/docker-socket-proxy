@@ -1,54 +1,40 @@
 package cli
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net"
 	"net/http"
-	"os"
 
 	"docker-socket-proxy/internal/management"
 )
 
 func RunList(paths *management.SocketPaths) {
-	// Connect to the management socket
-	client := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-				return net.Dial("unix", paths.Management)
-			},
-		},
-	}
+	// Create the client
+	client := createClient(paths.Management)
 
 	// Create the list request
 	req, err := http.NewRequest("GET", "http://localhost/list-sockets", nil)
 	if err != nil {
-		fmt.Printf("Error creating request: %v\n", err)
-		os.Exit(1)
+		exitWithError("Error creating request: %v", err)
 	}
 
 	// Send the request
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Printf("Error sending request: %v\n", err)
-		os.Exit(1)
+		exitWithError("Error sending request: %v", err)
 	}
 	defer resp.Body.Close()
 
-	// Check the response
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		fmt.Printf("Failed to list sockets: %s\n", body)
-		os.Exit(1)
+	// Handle the response
+	body, err := handleResponse(resp, http.StatusOK)
+	if err != nil {
+		exitWithError("Failed to list sockets: %v", err)
 	}
 
 	// Parse the response
 	var sockets []string
-	if err := json.NewDecoder(resp.Body).Decode(&sockets); err != nil {
-		fmt.Printf("Error parsing response: %v\n", err)
-		os.Exit(1)
+	if err := json.Unmarshal(body, &sockets); err != nil {
+		exitWithError("Error parsing response: %v", err)
 	}
 
 	// Print the sockets
@@ -57,6 +43,7 @@ func RunList(paths *management.SocketPaths) {
 		return
 	}
 
+	fmt.Println("Available sockets:")
 	for _, socket := range sockets {
 		fmt.Printf("  %s\n", socket)
 	}

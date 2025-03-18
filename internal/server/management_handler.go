@@ -148,32 +148,17 @@ func (h *ManagementHandler) handleDeleteSocket(w http.ResponseWriter, r *http.Re
 	log := logging.GetLogger()
 
 	// Get the socket path from the query parameters or header
-	socketPath := r.URL.Query().Get("socket")
-	if socketPath == "" {
+	socketName := r.URL.Query().Get("socket")
+	if socketName == "" {
 		// Try to get it from the header for backward compatibility
-		socketPath = r.Header.Get("Socket-Path")
-		if socketPath == "" {
+		socketName = r.Header.Get("Socket-Path")
+		if socketName == "" {
 			http.Error(w, "socket path is required", http.StatusBadRequest)
 			return
 		}
 	}
 
-	// If the socket path doesn't contain a directory separator,
-	// assume it's relative to the socket directory
-	if !strings.Contains(socketPath, "/") {
-		// Get the server from the context to get the socket directory
-		if srv, ok := r.Context().Value(serverContextKey).(*Server); ok {
-			socketPath = filepath.Join(srv.socketDir, socketPath)
-		} else {
-			// Try to get the default socket directory
-			socketDir := "/var/run/docker-proxy"
-			if envDir := os.Getenv("DOCKER_PROXY_SOCKET_DIR"); envDir != "" {
-				socketDir = envDir
-			}
-			socketPath = filepath.Join(socketDir, socketPath)
-		}
-	}
-
+	socketPath := h.resolveSocketPath(r, socketName)
 	log.Info("Deleting socket", "path", socketPath)
 
 	// Get the server from the context
@@ -285,25 +270,7 @@ func (h *ManagementHandler) handleDescribeSocket(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Get the server from the context to get the socket directory
-	var socketPath string
-	if srv, ok := r.Context().Value(serverContextKey).(*Server); ok {
-		// If the socket name doesn't contain a directory separator,
-		// assume it's relative to the socket directory
-		if !strings.Contains(socketName, "/") {
-			socketPath = filepath.Join(srv.socketDir, socketName)
-		} else {
-			socketPath = socketName
-		}
-	} else {
-		// Try to get the default socket directory
-		socketDir := "/var/run/docker-proxy"
-		if envDir := os.Getenv("DOCKER_PROXY_SOCKET_DIR"); envDir != "" {
-			socketDir = envDir
-		}
-		socketPath = filepath.Join(socketDir, socketName)
-	}
-
+	socketPath := h.resolveSocketPath(r, socketName)
 	log.Info("Describing socket", "path", socketPath)
 
 	// Check if the socket exists in our config map
@@ -345,4 +312,25 @@ func (h *ManagementHandler) Cleanup() {
 		os.Remove(path)
 		delete(h.servers, path)
 	}
+}
+
+// resolveSocketPath resolves a socket name to a full path
+func (h *ManagementHandler) resolveSocketPath(r *http.Request, socketName string) string {
+	// If the socket name already contains a directory separator,
+	// assume it's already a full path
+	if strings.Contains(socketName, "/") {
+		return socketName
+	}
+
+	// Get the server from the context to get the socket directory
+	if srv, ok := r.Context().Value(serverContextKey).(*Server); ok {
+		return filepath.Join(srv.socketDir, socketName)
+	}
+
+	// Try to get the default socket directory
+	socketDir := "/var/run/docker-proxy"
+	if envDir := os.Getenv("DOCKER_PROXY_SOCKET_DIR"); envDir != "" {
+		socketDir = envDir
+	}
+	return filepath.Join(socketDir, socketName)
 }

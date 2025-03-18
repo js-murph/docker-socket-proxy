@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -172,23 +173,62 @@ func TestManagementHandler_CreateSocket(t *testing.T) {
 }
 
 func TestManagementHandler_DeleteSocket(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "docker-proxy-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
 	configs := make(map[string]*config.SocketConfig)
-	store := storage.NewFileStore("/tmp/mgmt.sock")
+	store := storage.NewFileStore(tmpDir)
+
+	// Create a server instance for the context
+	srv := &Server{
+		socketDir:     tmpDir,
+		store:         store,
+		socketConfigs: configs,
+		proxyServers:  make(map[string]*http.Server),
+	}
+
+	// Create a test socket
+	socketPath := filepath.Join(tmpDir, "test.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.Close()
+
+	// Add the socket to the configs
+	configs[socketPath] = &config.SocketConfig{}
+
 	handler := NewManagementHandler("/tmp/docker.sock", configs, &sync.RWMutex{}, store)
 
 	tests := []struct {
 		name       string
-		socketPath string
+		socketName string
+		useHeader  bool
+		withServer bool
 		wantStatus int
 	}{
 		{
-			name:       "missing socket path",
-			socketPath: "",
+			name:       "missing socket name",
+			socketName: "",
+			useHeader:  false,
+			withServer: true,
 			wantStatus: http.StatusBadRequest,
 		},
 		{
-			name:       "valid delete request",
-			socketPath: "/tmp/test.sock",
+			name:       "valid socket with query param",
+			socketName: "test.sock",
+			useHeader:  false,
+			withServer: true,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "valid socket with header",
+			socketName: "test.sock",
+			useHeader:  true,
+			withServer: true,
 			wantStatus: http.StatusOK,
 		},
 	}
@@ -196,15 +236,30 @@ func TestManagementHandler_DeleteSocket(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest("DELETE", "/delete-socket", nil)
-			if tt.socketPath != "" {
-				req.Header.Set("Socket-Path", tt.socketPath)
-			}
-			w := httptest.NewRecorder()
 
+			// Add socket name as query param or header
+			if tt.socketName != "" {
+				if tt.useHeader {
+					req.Header.Set("Socket-Path", tt.socketName)
+				} else {
+					q := req.URL.Query()
+					q.Add("socket", tt.socketName)
+					req.URL.RawQuery = q.Encode()
+				}
+			}
+
+			// Add server to context if needed
+			if tt.withServer {
+				ctx := context.WithValue(req.Context(), serverContextKey, srv)
+				req = req.WithContext(ctx)
+			}
+
+			w := httptest.NewRecorder()
 			handler.ServeHTTP(w, req)
 
 			if w.Code != tt.wantStatus {
-				t.Errorf("ServeHTTP() status = %v, want %v", w.Code, tt.wantStatus)
+				t.Errorf("ServeHTTP() status = %v, want %v, body: %s",
+					w.Code, tt.wantStatus, w.Body.String())
 			}
 		})
 	}
@@ -418,6 +473,90 @@ func TestManagementHandler_DescribeSocket(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestManagementHandler_ResolveSocketPath(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "docker-proxy-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	configs := make(map[string]*config.SocketConfig)
+	store := storage.NewFileStore(tmpDir)
+
+	// Create a server instance for the context
+	srv := &Server{
+		socketDir:     tmpDir,
+		store:         store,
+		socketConfigs: configs,
+		proxyServers:  make(map[string]*http.Server),
+	}
+
+	handler := NewManagementHandler("/tmp/docker.sock", configs, &sync.RWMutex{}, store)
+
+	tests := []struct {
+		name       string
+		socketName string
+		withServer bool
+		want       string
+	}{
+		{
+			name:       "relative path with server context",
+			socketName: "test.sock",
+			withServer: true,
+			want:       filepath.Join(tmpDir, "test.sock"),
+		},
+		{
+			name:       "absolute path with server context",
+			socketName: "/var/run/test.sock",
+			withServer: true,
+			want:       "/var/run/test.sock",
+		},
+		{
+			name:       "relative path without server context",
+			socketName: "test.sock",
+			withServer: false,
+			want:       "/var/run/docker-proxy/test.sock", // Default directory
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/", nil)
+
+			if tt.withServer {
+				ctx := context.WithValue(req.Context(), serverContextKey, srv)
+				req = req.WithContext(ctx)
+			} else {
+				// Reset environment variable for test
+				oldEnv := os.Getenv("DOCKER_PROXY_SOCKET_DIR")
+				os.Setenv("DOCKER_PROXY_SOCKET_DIR", "")
+				defer os.Setenv("DOCKER_PROXY_SOCKET_DIR", oldEnv)
+			}
+
+			got := handler.resolveSocketPath(req, tt.socketName)
+			if got != tt.want {
+				t.Errorf("resolveSocketPath() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+
+	// Test with custom environment variable
+	t.Run("with custom environment variable", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/", nil)
+
+		// Set custom environment variable
+		oldEnv := os.Getenv("DOCKER_PROXY_SOCKET_DIR")
+		os.Setenv("DOCKER_PROXY_SOCKET_DIR", "/custom/path")
+		defer os.Setenv("DOCKER_PROXY_SOCKET_DIR", oldEnv)
+
+		got := handler.resolveSocketPath(req, "test.sock")
+		want := "/custom/path/test.sock"
+		if got != want {
+			t.Errorf("resolveSocketPath() = %v, want %v", got, want)
+		}
+	})
 }
 
 func TestManagementHandler(t *testing.T) {

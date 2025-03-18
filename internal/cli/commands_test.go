@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"encoding/json"
 	"io"
 	"net"
@@ -13,31 +12,18 @@ import (
 	"testing"
 
 	"docker-socket-proxy/internal/management"
+	"docker-socket-proxy/internal/proxy/config"
 
 	"github.com/spf13/cobra"
 )
 
 func TestRunCreate(t *testing.T) {
-	// Create a temporary directory for test files
+	// Create a temporary directory for the test socket
 	tmpDir, err := os.MkdirTemp("", "docker-proxy-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(tmpDir)
-
-	// Create a test config file
-	configPath := filepath.Join(tmpDir, "config.yaml")
-	configContent := `
-rules:
-  acls:
-    - match:
-        path: "/v1.*/containers"
-        method: "GET"
-      action: "allow"
-`
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
-		t.Fatal(err)
-	}
 
 	// Create a mock Unix socket server
 	socketPath := filepath.Join(tmpDir, "test.sock")
@@ -55,22 +41,46 @@ rules:
 		if r.URL.Path != "/create-socket" {
 			t.Errorf("Expected /create-socket path, got %s", r.URL.Path)
 		}
-		w.Write([]byte("/var/run/test-socket.sock"))
+
+		// Check if there's a config in the request
+		if r.Body != nil && r.Header.Get("Content-Type") == "application/json" {
+			var cfg config.SocketConfig
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Errorf("Failed to read request body: %v", err)
+			}
+
+			// Only try to decode if there's content
+			if len(body) > 0 {
+				if err := json.Unmarshal(body, &cfg); err != nil {
+					t.Errorf("Failed to decode request body: %v", err)
+				}
+			}
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("/var/run/docker-proxy/test-socket.sock"))
 	}))
 	server.Listener = l
 	server.Start()
 	defer server.Close()
 
-	// Set up test command
+	// Set up test command and arguments
 	cmd := &cobra.Command{}
-	cmd.Flags().String("config", configPath, "")
-
+	cmd.Flags().String("config", "", "")
 	paths := &management.SocketPaths{
 		Management: socketPath,
 	}
 
-	// Run the command
-	RunCreate(cmd, paths)
+	// Capture stdout
+	output := captureOutput(func() {
+		RunCreate(cmd, paths)
+	})
+
+	// Check output
+	if !strings.Contains(output, "/var/run/docker-proxy/test-socket.sock") {
+		t.Errorf("Expected output to contain socket path, got: %s", output)
+	}
 }
 
 func TestRunDelete(t *testing.T) {
@@ -102,6 +112,7 @@ func TestRunDelete(t *testing.T) {
 				r.Header.Get("Socket-Path"))
 		}
 		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Socket /var/run/test-socket.sock deleted successfully"))
 	}))
 	server.Listener = l
 	server.Start()
@@ -114,8 +125,15 @@ func TestRunDelete(t *testing.T) {
 		Management: socketPath,
 	}
 
-	// Run the command
-	RunDelete(cmd, args, paths)
+	// Capture stdout
+	output := captureOutput(func() {
+		RunDelete(cmd, args, paths)
+	})
+
+	// Check output
+	if !strings.Contains(output, "deleted successfully") {
+		t.Errorf("Expected output to contain success message, got: %s", output)
+	}
 }
 
 func TestRunList(t *testing.T) {
@@ -157,21 +175,9 @@ func TestRunList(t *testing.T) {
 	}
 
 	// Capture stdout
-	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	// Run the command
-	RunList(paths)
-
-	// Restore stdout
-	w.Close()
-	os.Stdout = oldStdout
-
-	// Read captured output
-	var buf bytes.Buffer
-	io.Copy(&buf, r)
-	output := buf.String()
+	output := captureOutput(func() {
+		RunList(paths)
+	})
 
 	// Check output
 	if !strings.Contains(output, "socket1.sock") || !strings.Contains(output, "socket2.sock") {
@@ -230,21 +236,9 @@ func TestRunDescribe(t *testing.T) {
 	}
 
 	// Capture stdout
-	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	// Run the command
-	RunDescribe(cmd, args, paths)
-
-	// Restore stdout
-	w.Close()
-	os.Stdout = oldStdout
-
-	// Read captured output
-	var buf bytes.Buffer
-	io.Copy(&buf, r)
-	output := buf.String()
+	output := captureOutput(func() {
+		RunDescribe(cmd, args, paths)
+	})
 
 	// Check output
 	if !strings.Contains(output, "rules:") ||
