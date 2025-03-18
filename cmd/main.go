@@ -63,7 +63,15 @@ func main() {
 		},
 	}
 
-	socketCmd.AddCommand(createCmd, deleteCmd)
+	var listCmd = &cobra.Command{
+		Use:   "list",
+		Short: "List available proxy sockets",
+		Run: func(cmd *cobra.Command, args []string) {
+			cli.RunList(paths)
+		},
+	}
+
+	socketCmd.AddCommand(createCmd, deleteCmd, listCmd)
 	rootCmd.AddCommand(daemonCmd, socketCmd)
 
 	var logLevel string

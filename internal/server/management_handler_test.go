@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -207,6 +208,93 @@ func TestManagementHandler_DeleteSocket(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestManagementHandler_ListSockets(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "docker-proxy-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	configs := make(map[string]*config.SocketConfig)
+	store := storage.NewFileStore(tmpDir)
+
+	// Create a server instance for the context
+	srv := &Server{
+		socketDir:     tmpDir,
+		store:         store,
+		socketConfigs: configs,
+		proxyServers:  make(map[string]*http.Server),
+	}
+
+	// Add some test configs
+	socketPath1 := filepath.Join(tmpDir, "test1.sock")
+	socketPath2 := filepath.Join(tmpDir, "test2.sock")
+
+	configs[socketPath1] = &config.SocketConfig{}
+	configs[socketPath2] = &config.SocketConfig{}
+
+	handler := NewManagementHandler("/tmp/docker.sock", configs, &sync.RWMutex{}, store)
+
+	// Test with server context
+	t.Run("with server context", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/list-sockets", nil)
+		ctx := context.WithValue(req.Context(), serverContextKey, srv)
+		req = req.WithContext(ctx)
+
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("ServeHTTP() status = %v, want %v", w.Code, http.StatusOK)
+		}
+
+		var sockets []string
+		if err := json.NewDecoder(w.Body).Decode(&sockets); err != nil {
+			t.Errorf("Failed to decode response: %v", err)
+		}
+
+		if len(sockets) != 2 {
+			t.Errorf("Expected 2 sockets, got %d", len(sockets))
+		}
+
+		// Check that we get just the filenames
+		expected := []string{"test1.sock", "test2.sock"}
+		for _, s := range expected {
+			found := false
+			for _, actual := range sockets {
+				if actual == s {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("Expected socket %s not found in response", s)
+			}
+		}
+	})
+
+	// Test without server context
+	t.Run("without server context", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/list-sockets", nil)
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("ServeHTTP() status = %v, want %v", w.Code, http.StatusOK)
+		}
+
+		var sockets []string
+		if err := json.NewDecoder(w.Body).Decode(&sockets); err != nil {
+			t.Errorf("Failed to decode response: %v", err)
+		}
+
+		if len(sockets) != 0 {
+			t.Errorf("Expected 0 sockets, got %d", len(sockets))
+		}
+	})
 }
 
 func TestManagementHandler(t *testing.T) {

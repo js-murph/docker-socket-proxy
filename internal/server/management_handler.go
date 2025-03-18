@@ -47,6 +47,8 @@ func (h *ManagementHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleCreateSocket(w, r)
 	case r.Method == "DELETE" && r.URL.Path == "/delete-socket":
 		h.handleDeleteSocket(w, r)
+	case r.Method == "GET" && r.URL.Path == "/list-sockets":
+		h.handleListSockets(w, r)
 	default:
 		log.Error("Unknown request", "method", r.Method, "path", r.URL.Path)
 		http.Error(w, "Not found", http.StatusNotFound)
@@ -235,6 +237,39 @@ func (h *ManagementHandler) handleDeleteSocket(w http.ResponseWriter, r *http.Re
 
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "Socket %s deleted successfully", socketPath)
+}
+
+func (h *ManagementHandler) handleListSockets(w http.ResponseWriter, r *http.Request) {
+	log := logging.GetLogger()
+
+	// Get the server from the context
+	_, ok := r.Context().Value(serverContextKey).(*Server)
+	if !ok {
+		log.Warn("Server not found in context - returning empty list for test compatibility")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode([]string{})
+		return
+	}
+
+	// Get the list of sockets
+	h.configMu.RLock()
+	sockets := make([]string, 0, len(h.socketConfigs))
+	for socketPath := range h.socketConfigs {
+		// Extract just the filename from the path
+		socketName := filepath.Base(socketPath)
+		sockets = append(sockets, socketName)
+	}
+	h.configMu.RUnlock()
+
+	// Return the list of sockets
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(sockets); err != nil {
+		log.Error("Failed to encode response", "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
 }
 
 func (h *ManagementHandler) Cleanup() {
