@@ -43,3 +43,16 @@ func (p *SocketPaths) Validate() error {
 
 	return nil
 }
+
+// GetManagementSocketPath returns the path to the management socket
+func GetManagementSocketPath() (string, error) {
+	// Default management socket path
+	socketPath := DefaultManagementSocketPath
+
+	// Check if a custom path is specified in the environment
+	if envPath := os.Getenv("DOCKER_PROXY_MANAGEMENT_SOCKET"); envPath != "" {
+		socketPath = envPath
+	}
+
+	return socketPath, nil
+}

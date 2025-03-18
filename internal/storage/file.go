@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +8,8 @@ import (
 
 	"docker-socket-proxy/internal/logging"
 	"docker-socket-proxy/internal/proxy/config"
+
+	"gopkg.in/yaml.v3"
 )
 
 type FileStore struct {
@@ -24,17 +25,18 @@ func NewFileStore(managementSocket string) *FileStore {
 }
 
 func (s *FileStore) configPath(socketPath string) string {
-	// Create a config file next to each socket with .sock.config extension
+	// Create a config file next to each socket with .config extension
 	return socketPath + ".config"
 }
 
 func (s *FileStore) SaveConfig(socketPath string, cfg *config.SocketConfig) error {
-	data, err := json.Marshal(cfg)
+	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(s.configPath(socketPath), data, 0600); err != nil {
+	configPath := s.configPath(socketPath)
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
@@ -42,16 +44,14 @@ func (s *FileStore) SaveConfig(socketPath string, cfg *config.SocketConfig) erro
 }
 
 func (s *FileStore) LoadConfig(socketPath string) (*config.SocketConfig, error) {
-	data, err := os.ReadFile(s.configPath(socketPath))
+	configPath := s.configPath(socketPath)
+	data, err := os.ReadFile(configPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
 	var cfg config.SocketConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
@@ -71,26 +71,29 @@ func (s *FileStore) LoadExistingConfigs() (map[string]*config.SocketConfig, erro
 
 	for _, entry := range entries {
 		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, ".sock.config") {
+		if entry.IsDir() {
 			continue
 		}
 
-		log.Debug("Found config file", "name", name)
+		// Only look for .config files
+		if !strings.HasSuffix(name, ".config") {
+			continue
+		}
 
 		// Get the socket path by removing .config suffix
-		socketPath := strings.TrimSuffix(filepath.Join(s.baseDir, name), ".config")
+		socketPath := filepath.Join(s.baseDir, strings.TrimSuffix(name, ".config"))
+		log.Debug("Found config file", "socket", socketPath)
+
 		cfg, err := s.LoadConfig(socketPath)
 		if err != nil {
 			log.Error("Failed to load config", "path", socketPath, "error", err)
 			continue
 		}
 		if cfg != nil {
-			log.Debug("Loaded config successfully", "socket", socketPath)
 			configs[socketPath] = cfg
 		}
 	}
 
-	log.Debug("Completed loading configs", "count", len(configs))
 	return configs, nil
 }
 

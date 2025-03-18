@@ -774,3 +774,35 @@ func deleteEnvVars(body map[string]interface{}, path []string, arr []interface{}
 	}
 	return false
 }
+
+// DeleteSocket stops and removes a proxy socket
+func (s *Server) DeleteSocket(socketPath string) error {
+	// Stop the proxy server if it's running
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+
+	if server, ok := s.proxyServers[socketPath]; ok {
+		if err := server.Close(); err != nil {
+			return fmt.Errorf("failed to stop proxy server: %w", err)
+		}
+		delete(s.proxyServers, socketPath)
+	}
+
+	// Remove the socket file
+	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove socket file: %w", err)
+	}
+
+	// Remove the config
+	delete(s.socketConfigs, socketPath)
+
+	// Remove from created sockets list
+	for i, path := range s.createdSockets {
+		if path == socketPath {
+			s.createdSockets = append(s.createdSockets[:i], s.createdSockets[i+1:]...)
+			break
+		}
+	}
+
+	return nil
+}

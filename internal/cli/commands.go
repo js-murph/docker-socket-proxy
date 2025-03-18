@@ -71,6 +71,14 @@ func RunCreate(cmd *cobra.Command, paths *management.SocketPaths) {
 }
 
 func RunDelete(cmd *cobra.Command, args []string, paths *management.SocketPaths) {
+	if len(args) == 0 {
+		fmt.Println("Error: socket path is required")
+		os.Exit(1)
+	}
+
+	socketPath := args[0]
+
+	// Connect to the management socket
 	client := &http.Client{
 		Transport: &http.Transport{
 			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
@@ -79,23 +87,35 @@ func RunDelete(cmd *cobra.Command, args []string, paths *management.SocketPaths)
 		},
 	}
 
-	req, err := http.NewRequest("DELETE", "http://unix/delete-socket", nil)
+	// Create the delete request
+	req, err := http.NewRequest("DELETE", "http://localhost/delete-socket", nil)
 	if err != nil {
 		fmt.Printf("Error creating request: %v\n", err)
 		os.Exit(1)
 	}
-	req.Header.Set("Socket-Path", args[0])
 
+	// Add the socket path as a query parameter
+	q := req.URL.Query()
+	q.Add("socket", socketPath)
+	req.URL.RawQuery = q.Encode()
+
+	// Add the Socket-Path header for backward compatibility
+	req.Header.Set("Socket-Path", socketPath)
+
+	// Send the request
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Printf("Error deleting socket: %v\n", err)
+		fmt.Printf("Error sending request: %v\n", err)
 		os.Exit(1)
 	}
 	defer resp.Body.Close()
 
+	// Check the response
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		fmt.Printf("Server error: %s\n", body)
+		fmt.Printf("Failed to delete socket: %s\n", body)
 		os.Exit(1)
 	}
+
+	fmt.Printf("Socket %s deleted successfully\n", socketPath)
 }

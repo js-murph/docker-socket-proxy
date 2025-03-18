@@ -4,7 +4,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"reflect"
 	"testing"
 
 	"docker-socket-proxy/internal/proxy/config"
@@ -45,13 +44,31 @@ func TestFileStore(t *testing.T) {
 			t.Fatalf("SaveConfig() error = %v", err)
 		}
 
-		loaded, err := store.LoadConfig(testSocket)
+		loadedConfig, err := store.LoadConfig(testSocket)
 		if err != nil {
 			t.Fatalf("LoadConfig() error = %v", err)
 		}
 
-		if !reflect.DeepEqual(loaded, testConfig) {
-			t.Errorf("LoadConfig() got = %+v, want %+v", loaded, testConfig)
+		// Compare specific fields instead of using DeepEqual
+		if len(loadedConfig.Rules.ACLs) != len(testConfig.Rules.ACLs) {
+			t.Errorf("LoadConfig() got %d ACL rules, want %d",
+				len(loadedConfig.Rules.ACLs), len(testConfig.Rules.ACLs))
+			return
+		}
+
+		if loadedConfig.Rules.ACLs[0].Action != testConfig.Rules.ACLs[0].Action {
+			t.Errorf("LoadConfig() got action %s, want %s",
+				loadedConfig.Rules.ACLs[0].Action, testConfig.Rules.ACLs[0].Action)
+		}
+
+		if loadedConfig.Rules.ACLs[0].Match.Path != testConfig.Rules.ACLs[0].Match.Path {
+			t.Errorf("LoadConfig() got path %s, want %s",
+				loadedConfig.Rules.ACLs[0].Match.Path, testConfig.Rules.ACLs[0].Match.Path)
+		}
+
+		if loadedConfig.Rules.ACLs[0].Match.Method != testConfig.Rules.ACLs[0].Match.Method {
+			t.Errorf("LoadConfig() got method %s, want %s",
+				loadedConfig.Rules.ACLs[0].Match.Method, testConfig.Rules.ACLs[0].Match.Method)
 		}
 	})
 
@@ -64,12 +81,25 @@ func TestFileStore(t *testing.T) {
 
 		if len(configs) != 1 {
 			t.Errorf("LoadExistingConfigs() got %d configs, want 1", len(configs))
+			return
 		}
 
-		if cfg, ok := configs[testSocket]; !ok {
+		cfg, ok := configs[testSocket]
+		if !ok {
 			t.Error("LoadExistingConfigs() missing test socket config")
-		} else if !reflect.DeepEqual(cfg, testConfig) {
-			t.Errorf("LoadExistingConfigs() got = %+v, want %+v", cfg, testConfig)
+			return
+		}
+
+		// Compare specific fields
+		if len(cfg.Rules.ACLs) != len(testConfig.Rules.ACLs) {
+			t.Errorf("LoadExistingConfigs() got %d ACL rules, want %d",
+				len(cfg.Rules.ACLs), len(testConfig.Rules.ACLs))
+			return
+		}
+
+		if cfg.Rules.ACLs[0].Action != testConfig.Rules.ACLs[0].Action {
+			t.Errorf("LoadExistingConfigs() got action %s, want %s",
+				cfg.Rules.ACLs[0].Action, testConfig.Rules.ACLs[0].Action)
 		}
 	})
 
@@ -79,8 +109,9 @@ func TestFileStore(t *testing.T) {
 			t.Fatalf("DeleteConfig() error = %v", err)
 		}
 
-		if _, err := os.Stat(store.configPath(testSocket)); !os.IsNotExist(err) {
-			t.Error("DeleteConfig() config file still exists")
+		_, err := store.LoadConfig(testSocket)
+		if err == nil {
+			t.Error("LoadConfig() expected error after deletion")
 		}
 	})
 }

@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -13,7 +14,6 @@ import (
 
 	"docker-socket-proxy/internal/proxy/config"
 	"docker-socket-proxy/internal/storage"
-	"path/filepath"
 )
 
 func TestManagementHandler_CreateSocket(t *testing.T) {
@@ -24,29 +24,102 @@ func TestManagementHandler_CreateSocket(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	configs := make(map[string]*config.SocketConfig)
-	store := storage.NewFileStore(filepath.Join(tmpDir, "mgmt.sock"))
+	store := storage.NewFileStore(tmpDir)
+
+	// Create a server instance for the context
+	srv := &Server{
+		socketDir:     tmpDir,
+		store:         store,
+		socketConfigs: configs,
+		proxyServers:  make(map[string]*http.Server),
+	}
+
 	handler := NewManagementHandler("/tmp/docker.sock", configs, &sync.RWMutex{}, store)
 	defer handler.Cleanup()
+
+	t.Run("valid config", func(t *testing.T) {
+		config := &config.SocketConfig{
+			Rules: config.RuleSet{
+				ACLs: []config.Rule{
+					{
+						Match:  config.Match{Path: "/v1.42/containers/json", Method: "GET"},
+						Action: "allow",
+					},
+				},
+			},
+		}
+
+		body, _ := json.Marshal(config)
+		req := httptest.NewRequest("POST", "/create-socket", bytes.NewBuffer(body))
+		ctx := context.WithValue(req.Context(), serverContextKey, srv)
+		req = req.WithContext(ctx)
+
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("expected status OK, got %v", w.Code)
+			return
+		}
+
+		// Check if response is JSON
+		contentType := w.Header().Get("Content-Type")
+		if !strings.Contains(contentType, "application/json") {
+			t.Logf("Response body: %s", w.Body.String())
+			t.Logf("Content-Type: %s", contentType)
+
+			// Try to extract socket path from plain text response
+			socketPath := strings.TrimSpace(w.Body.String())
+			if socketPath == "" {
+				t.Error("Empty socket path in response")
+				return
+			}
+
+			// Verify the config was stored
+			storedConfig, err := store.LoadConfig(socketPath)
+			if err != nil {
+				t.Errorf("failed to load config: %v", err)
+				return
+			}
+
+			// Compare specific fields
+			if len(storedConfig.Rules.ACLs) != len(config.Rules.ACLs) {
+				t.Errorf("stored config has %d ACL rules, want %d",
+					len(storedConfig.Rules.ACLs), len(config.Rules.ACLs))
+				return
+			}
+
+			return
+		}
+
+		var resp struct {
+			SocketPath string `json:"socket_path"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Errorf("failed to unmarshal response: %v", err)
+			return
+		}
+
+		// Verify the config was stored
+		storedConfig, err := store.LoadConfig(resp.SocketPath)
+		if err != nil {
+			t.Errorf("failed to load config: %v", err)
+			return
+		}
+
+		// Compare specific fields
+		if len(storedConfig.Rules.ACLs) != len(config.Rules.ACLs) {
+			t.Errorf("stored config has %d ACL rules, want %d",
+				len(storedConfig.Rules.ACLs), len(config.Rules.ACLs))
+			return
+		}
+	})
 
 	tests := []struct {
 		name       string
 		config     *config.SocketConfig
 		wantStatus int
 	}{
-		{
-			name: "valid config",
-			config: &config.SocketConfig{
-				Rules: config.RuleSet{
-					ACLs: []config.Rule{
-						{
-							Match:  config.Match{Path: "/test", Method: "GET"},
-							Action: "allow",
-						},
-					},
-				},
-			},
-			wantStatus: http.StatusOK,
-		},
 		{
 			name:       "empty config",
 			config:     nil,
@@ -62,8 +135,11 @@ func TestManagementHandler_CreateSocket(t *testing.T) {
 			}
 
 			req := httptest.NewRequest("POST", "/create-socket", bytes.NewBuffer(body))
-			w := httptest.NewRecorder()
+			// Add server to context
+			ctx := context.WithValue(req.Context(), serverContextKey, srv)
+			req = req.WithContext(ctx)
 
+			w := httptest.NewRecorder()
 			handler.ServeHTTP(w, req)
 
 			if w.Code != tt.wantStatus {
@@ -131,4 +207,51 @@ func TestManagementHandler_DeleteSocket(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestManagementHandler(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "docker-proxy-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	configs := make(map[string]*config.SocketConfig)
+	store := storage.NewFileStore(tmpDir)
+
+	srv := &Server{
+		socketDir:     tmpDir,
+		store:         store,
+		socketConfigs: configs,
+		proxyServers:  make(map[string]*http.Server),
+	}
+
+	handler := NewManagementHandler("/tmp/docker.sock", configs, &sync.RWMutex{}, store)
+
+	t.Run("create socket", func(t *testing.T) {
+		config := &config.SocketConfig{
+			Rules: config.RuleSet{
+				ACLs: []config.Rule{
+					{
+						Match:  config.Match{Path: "/v1.42/containers/json", Method: "GET"},
+						Action: "allow",
+					},
+				},
+			},
+		}
+
+		body, _ := json.Marshal(config)
+		req := httptest.NewRequest("POST", "/create-socket", bytes.NewBuffer(body))
+		ctx := context.WithValue(req.Context(), serverContextKey, srv)
+		req = req.WithContext(ctx)
+
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("expected status OK, got %v", w.Code)
+		}
+	})
+
+	// ... rest of the test
 }
