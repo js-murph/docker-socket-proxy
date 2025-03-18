@@ -28,7 +28,12 @@ func main() {
 		Use:   "daemon",
 		Short: "Run the proxy server daemon",
 		Run: func(cmd *cobra.Command, args []string) {
-			srv = server.New(paths)
+			var err error
+			srv, err = server.NewServer(paths.Management, paths.Docker, paths.SocketDir)
+			if err != nil {
+				slog.Error("Failed to create server", "error", err)
+				os.Exit(1)
+			}
 			runDaemon(srv)
 		},
 	}

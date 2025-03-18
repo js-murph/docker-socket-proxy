@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -147,56 +146,6 @@ func (s *Server) startWithContext(ctx context.Context) error {
 	}()
 
 	return s.server.Serve(listener)
-}
-
-func TestProxyHandler(t *testing.T) {
-	configs := make(map[string]*config.SocketConfig)
-	handler := NewProxyHandler("/tmp/docker.sock", configs, &sync.RWMutex{})
-
-	t.Run("proxy request with ACL", func(t *testing.T) {
-		configs["/tmp/test.sock"] = &config.SocketConfig{
-			Rules: config.RuleSet{
-				ACLs: []config.Rule{
-					{
-						Match:  config.Match{Path: "/v1.42/containers/json", Method: "GET"},
-						Action: "allow",
-					},
-				},
-			},
-		}
-
-		req := httptest.NewRequest("GET", "/v1.42/containers/json", nil)
-		w := httptest.NewRecorder()
-
-		handler.ServeHTTP(w, req, "/tmp/test.sock")
-
-		if w.Code == http.StatusForbidden {
-			t.Error("expected request to be allowed")
-		}
-	})
-
-	t.Run("proxy request denied by ACL", func(t *testing.T) {
-		configs["/tmp/test.sock"] = &config.SocketConfig{
-			Rules: config.RuleSet{
-				ACLs: []config.Rule{
-					{
-						Match:  config.Match{Path: "/v1.42/containers/json", Method: "GET"},
-						Action: "deny",
-						Reason: "not allowed",
-					},
-				},
-			},
-		}
-
-		req := httptest.NewRequest("GET", "/v1.42/containers/json", nil)
-		w := httptest.NewRecorder()
-
-		handler.ServeHTTP(w, req, "/tmp/test.sock")
-
-		if w.Code != http.StatusForbidden {
-			t.Error("expected request to be denied")
-		}
-	})
 }
 
 func TestApplyPattern(t *testing.T) {

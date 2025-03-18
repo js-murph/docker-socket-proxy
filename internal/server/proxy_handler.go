@@ -1,262 +1,159 @@
 package server
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"strings"
 	"sync"
+	"time"
 
 	"docker-socket-proxy/internal/logging"
 	"docker-socket-proxy/internal/proxy/config"
 )
 
+// ProxyHandler handles proxying requests to the Docker socket
 type ProxyHandler struct {
-	dockerSocket string
-	configs      map[string]*config.SocketConfig
-	configMu     *sync.RWMutex
+	dockerSocket  string
+	socketConfigs map[string]*config.SocketConfig
+	configMu      *sync.RWMutex
+	reverseProxy  *httputil.ReverseProxy
 }
 
+// NewProxyHandler creates a new proxy handler
 func NewProxyHandler(dockerSocket string, configs map[string]*config.SocketConfig, mu *sync.RWMutex) *ProxyHandler {
 	return &ProxyHandler{
-		dockerSocket: dockerSocket,
-		configs:      configs,
-		configMu:     mu,
+		dockerSocket:  dockerSocket,
+		socketConfigs: configs,
+		configMu:      mu,
 	}
 }
 
-func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, socketPath string) {
-	log := logging.GetLogger()
-	log.Debug("Received proxy request",
-		"method", r.Method,
-		"path", r.URL.Path,
-		"socket", socketPath)
+// ServeHTTP handles HTTP requests by checking ACLs and proxying to Docker
+func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// This is for backward compatibility with existing code
+	h.ServeHTTPWithSocket(w, r, h.dockerSocket)
+}
 
+// ServeHTTPWithSocket handles HTTP requests for a specific socket
+func (h *ProxyHandler) ServeHTTPWithSocket(w http.ResponseWriter, r *http.Request, socketPath string) {
+	log := logging.GetLogger()
+	start := time.Now()
+
+	// Get the socket configuration
 	h.configMu.RLock()
-	config, exists := h.configs[socketPath]
+	socketConfig, _ := h.socketConfigs[socketPath]
 	h.configMu.RUnlock()
 
-	if !exists {
-		log.Error("No configuration found for socket", "socket", socketPath)
-		http.Error(w, "Socket configuration not found", http.StatusInternalServerError)
-		return
-	}
+	// Check if the request is allowed by the ACLs
+	allowed, reason := h.checkACLs(r, socketConfig)
 
-	allowed, reason := h.checkACLRules(socketPath, r)
+	// Log the request
+	log.Info("Proxy request",
+		"method", r.Method,
+		"path", r.URL.Path,
+		"socket", socketPath,
+		"allowed", allowed,
+		"reason", reason,
+	)
+
 	if !allowed {
-		log.Info("Request denied by ACL",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"reason", reason)
-		http.Error(w, reason, http.StatusForbidden)
+		http.Error(w, "Access denied by ACL: "+reason, http.StatusForbidden)
 		return
 	}
 
-	// Apply both propagation and rewrite rules
-	if config != nil {
-		// First apply propagation rules
-		if rules := config.GetPropagationRules(); len(rules) > 0 {
-			if err := h.applyRules(r, rules); err != nil {
-				log.Error("Failed to apply socket propagation rules",
-					"error", err,
-					"path", r.URL.Path)
-				http.Error(w, "Internal server error", http.StatusInternalServerError)
-				return
-			}
-		}
-
-		// Then apply regular rewrite rules
-		if len(config.Rules.Rewrites) > 0 {
-			if err := h.applyRules(r, config.Rules.Rewrites); err != nil {
-				log.Error("Failed to apply rewrite rules",
-					"error", err,
-					"path", r.URL.Path)
-				http.Error(w, "Internal server error", http.StatusInternalServerError)
-				return
-			}
-		}
-	}
-
-	// Create the reverse proxy
-	proxy := &httputil.ReverseProxy{
-		Director: func(req *http.Request) {
-			req.URL.Scheme = "http"
-			req.URL.Host = h.dockerSocket
-			req.Host = h.dockerSocket
-		},
-		Transport: &http.Transport{
-			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-				return net.Dial("unix", h.dockerSocket)
-			},
-		},
-	}
-
-	log.Debug("Proxying request",
-		"method", r.Method,
-		"path", r.URL.Path,
-		"to", h.dockerSocket)
-
-	proxy.ServeHTTP(w, r)
-}
-
-func (h *ProxyHandler) checkACLRules(socketPath string, r *http.Request) (bool, string) {
-	h.configMu.RLock()
-	config, exists := h.configs[socketPath]
-	h.configMu.RUnlock()
-
-	if !exists || config == nil {
-		return true, "" // No config means allow
-	}
-
-	log := logging.GetLogger()
-	defaultAction := "deny" // Default to deny if no rules match
-
-	// Process rules in order
-	for _, rule := range config.Rules.ACLs {
-		if matchesRule(r, rule.Match) {
-			log.Debug("ACL rule matched",
-				"path", r.URL.Path,
-				"method", r.Method,
-				"action", rule.Action)
-
-			switch rule.Action {
-			case "allow":
-				return true, ""
-			case "deny":
-				return false, rule.Reason
-			}
-		}
-	}
-
-	// No rules matched, use default action
-	if defaultAction == "deny" {
-		return false, "No matching allow rules"
-	}
-	return true, ""
-}
-
-// applyRules applies the given rules to the request
-func (h *ProxyHandler) applyRules(r *http.Request, rules []config.RewriteRule) error {
-	log := logging.GetLogger()
-
-	// Only handle JSON content
-	if !strings.Contains(r.Header.Get("Content-Type"), "application/json") {
-		log.Debug("Skipping non-JSON request",
-			"content-type", r.Header.Get("Content-Type"),
-			"path", r.URL.Path)
-		return nil
-	}
-
-	// Skip if no body
-	if r.Body == nil || r.ContentLength == 0 {
-		log.Debug("Skipping empty body request",
-			"path", r.URL.Path)
-		return nil
-	}
-
-	// Read and parse body
-	bodyBytes, err := io.ReadAll(r.Body)
+	// Create a Unix socket connection to Docker
+	conn, err := net.Dial("unix", h.dockerSocket)
 	if err != nil {
-		return err
+		log.Error("Failed to connect to Docker socket", "error", err)
+		http.Error(w, "Failed to connect to Docker socket: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
-	r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+	defer conn.Close()
 
-	var requestBody map[string]interface{}
-	if err := json.Unmarshal(bodyBytes, &requestBody); err != nil {
-		log.Debug("Failed to parse JSON body",
-			"error", err,
-			"path", r.URL.Path)
-		return err
+	// Create a new HTTP client connection
+	client := httputil.NewClientConn(conn, nil)
+	defer client.Close()
+
+	// Copy the original request
+	outreq := new(http.Request)
+	*outreq = *r
+
+	// Set the URL for the Docker API
+	outreq.URL.Scheme = "http"
+	outreq.URL.Host = "unix"
+
+	// Send the request
+	resp, err := client.Do(outreq)
+	if err != nil {
+		log.Error("Failed to send request to Docker", "error", err)
+		http.Error(w, "Failed to send request to Docker: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	// Copy the response headers
+	for k, v := range resp.Header {
+		for _, vv := range v {
+			w.Header().Add(k, vv)
+		}
 	}
 
-	log.Debug("Processing rules",
-		"path", r.URL.Path,
+	// Copy the status code
+	w.WriteHeader(resp.StatusCode)
+
+	// Copy the response body
+	io.Copy(w, resp.Body)
+
+	// Log the response time
+	log.Debug("Proxy response",
 		"method", r.Method,
-		"rules_count", len(rules))
-
-	modified := false
-	for _, rule := range rules {
-		if matchesRule(r, rule.Match) {
-			log.Debug("Rule matched",
-				"path_pattern", rule.Match.Path,
-				"method", rule.Match.Method)
-
-			for _, pattern := range rule.Patterns {
-				if rewritten := applyPatternToRequest(requestBody, pattern); rewritten {
-					modified = true
-				}
-			}
-		} else {
-			log.Debug("Rule did not match",
-				"path_pattern", rule.Match.Path,
-				"method", rule.Match.Method,
-				"actual_path", r.URL.Path,
-				"actual_method", r.Method)
-		}
-	}
-
-	// If modified, update request body
-	if modified {
-		newBody, err := json.Marshal(requestBody)
-		if err != nil {
-			return err
-		}
-		r.Body = io.NopCloser(bytes.NewBuffer(newBody))
-		r.ContentLength = int64(len(newBody))
-		log.Debug("Request body modified",
-			"new_body", string(newBody))
-	} else {
-		log.Debug("No modifications made to request body")
-	}
-
-	return nil
+		"path", r.URL.Path,
+		"socket", socketPath,
+		"duration", time.Since(start),
+	)
 }
 
-func applyPatternToRequest(data map[string]interface{}, pattern config.Pattern) bool {
-	log := logging.GetLogger()
-	parts := strings.Split(pattern.Field, ".")
-
-	// Navigate to the parent object
-	current := data
-	for i := 0; i < len(parts)-1; i++ {
-		next, ok := current[parts[i]].(map[string]interface{})
-		if !ok {
-			next = make(map[string]interface{})
-			current[parts[i]] = next
-		}
-		current = next
+// checkACLs checks if a request is allowed by the ACLs
+func (h *ProxyHandler) checkACLs(r *http.Request, socketConfig *config.SocketConfig) (bool, string) {
+	// If there's no config, allow all requests
+	if socketConfig == nil {
+		return true, ""
 	}
 
-	lastPart := parts[len(parts)-1]
-	switch pattern.Action {
-	case "upsert":
-		switch v := pattern.Value.(type) {
-		case []interface{}:
-			existing, ok := current[lastPart].([]interface{})
-			if !ok {
-				current[lastPart] = v
-			} else {
-				current[lastPart] = append(existing, v...)
-			}
-		case string:
-			existing, ok := current[lastPart].([]interface{})
-			if !ok {
-				current[lastPart] = []interface{}{v}
-			} else {
-				current[lastPart] = append(existing, v)
-			}
-		default:
-			current[lastPart] = pattern.Value
-		}
-		log.Debug("Upsert operation completed",
-			"field", pattern.Field,
-			"value", pattern.Value,
-			"result", current[lastPart])
-		return true
+	// If there are no ACLs, deny by default
+	if len(socketConfig.Rules.ACLs) == 0 {
+		return false, "no ACLs defined"
 	}
-	return false
+
+	// Check each ACL rule
+	for _, rule := range socketConfig.Rules.ACLs {
+		// Check if the rule matches the request
+		if h.ruleMatches(r, rule.Match) {
+			if rule.Action == "allow" {
+				return true, ""
+			} else {
+				return false, "method not allowed"
+			}
+		}
+	}
+
+	// If no rule matches, deny by default
+	return false, "No matching allow rules"
+}
+
+// ruleMatches checks if a request matches an ACL rule
+func (h *ProxyHandler) ruleMatches(r *http.Request, match config.Match) bool {
+	// Check path match
+	if match.Path != "" && !strings.HasPrefix(r.URL.Path, match.Path) {
+		return false
+	}
+
+	// Check method match
+	if match.Method != "" && r.Method != match.Method {
+		return false
+	}
+
+	return true
 }

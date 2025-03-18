@@ -152,7 +152,7 @@ func (h *ManagementHandler) createSocket(socketPath string, socketConfig *config
 	// Create and start the proxy server
 	server := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			h.proxyHandler.ServeHTTP(w, r, socketPath)
+			h.proxyHandler.ServeHTTP(w, r)
 		}),
 	}
 
