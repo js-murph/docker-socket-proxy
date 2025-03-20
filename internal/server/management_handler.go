@@ -42,6 +42,7 @@ func NewManagementHandler(dockerSocket string, configs map[string]*config.Socket
 // ServeHTTP handles HTTP requests to the management server
 func (h *ManagementHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log := logging.GetLogger()
+	log.Debug("Management request received", "method", r.Method, "path", r.URL.Path)
 
 	// Log the request
 	log.Info("Management request",
@@ -59,6 +60,8 @@ func (h *ManagementHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleDescribeSocket(w, r)
 	case r.Method == "DELETE" && (strings.HasPrefix(r.URL.Path, "/socket/") || r.URL.Path == "/delete-socket"):
 		h.handleDeleteSocket(w, r)
+	case r.Method == "DELETE" && r.URL.Path == "/sockets":
+		h.cleanSockets(w, r)
 	default:
 		log.Error("Unknown request", "method", r.Method, "path", r.URL.Path)
 		http.Error(w, "Not found", http.StatusNotFound)
@@ -378,4 +381,52 @@ func (h *ManagementHandler) resolveSocketPath(r *http.Request, socketName string
 		socketDir = envDir
 	}
 	return filepath.Join(socketDir, socketName)
+}
+
+// cleanSockets removes all sockets
+func (h *ManagementHandler) cleanSockets(w http.ResponseWriter, r *http.Request) {
+	log := logging.GetLogger()
+	log.Info("Cleaning all sockets")
+
+	// Get the server from the context
+	srv, ok := r.Context().Value(serverContextKey).(*Server)
+	if !ok {
+		log.Error("Server not found in context")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Get the list of sockets
+	h.configMu.RLock()
+	sockets := make([]string, 0, len(h.socketConfigs))
+	for socket := range h.socketConfigs {
+		sockets = append(sockets, socket)
+	}
+	h.configMu.RUnlock()
+
+	// Delete each socket
+	var errs []string
+	for _, socket := range sockets {
+		if err := h.deleteSocket(socket, srv); err != nil {
+			log.Error("Failed to delete socket", "socket", socket, "error", err)
+			errs = append(errs, fmt.Sprintf("%s: %v", socket, err))
+		}
+	}
+
+	// Return the result
+	if len(errs) > 0 {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "error",
+			"message": "Failed to delete some sockets",
+			"errors":  errs,
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "success",
+		"message": fmt.Sprintf("Deleted %d sockets", len(sockets)),
+	})
 }

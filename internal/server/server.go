@@ -455,7 +455,6 @@ func mergeStructure(body map[string]interface{}, update map[string]interface{}, 
 
 						// First, identify which elements in the original array should be replaced
 						for _, updateItem := range updateArray {
-
 							// Try to find a matching element to replace
 							for i, actualItem := range actualArray {
 								if !replacedIndices[i] && isReplacementCandidate(actualItem, updateItem) {
@@ -479,24 +478,68 @@ func mergeStructure(body map[string]interface{}, update map[string]interface{}, 
 						body[key] = newArray
 						modified = true
 					} else {
-						// For upsert, append items not already in the array
-						newItems := false
-						for _, updateItem := range updateArray {
-							found := false
-							for _, actualItem := range actualArray {
-								if reflect.DeepEqual(actualItem, updateItem) {
-									found = true
-									break
+						// For upsert, check if we're dealing with key-value pairs
+						isKeyValueArray := isKeyValueArray(updateArray)
+
+						if isKeyValueArray {
+							// Create a map of keys to their values for the current array
+							keyMap := make(map[string]int)
+							for i, item := range actualArray {
+								if str, ok := item.(string); ok {
+									parts := strings.SplitN(str, "=", 2)
+									if len(parts) > 0 {
+										keyMap[parts[0]] = i
+									}
 								}
 							}
-							if !found {
-								actualArray = append(actualArray, updateItem)
-								newItems = true
+
+							// Create a copy of the original array
+							newArray := make([]interface{}, len(actualArray))
+							copy(newArray, actualArray)
+
+							// Process each update item
+							arrayModified := false
+							for _, updateItem := range updateArray {
+								if str, ok := updateItem.(string); ok {
+									parts := strings.SplitN(str, "=", 2)
+									if len(parts) > 0 {
+										// If this key already exists, update it
+										if idx, exists := keyMap[parts[0]]; exists {
+											newArray[idx] = str
+											arrayModified = true
+										} else {
+											// Otherwise append it
+											newArray = append(newArray, str)
+											arrayModified = true
+										}
+									}
+								}
 							}
-						}
-						if newItems {
-							body[key] = actualArray
-							modified = true
+
+							if arrayModified {
+								body[key] = newArray
+								modified = true
+							}
+						} else {
+							// For regular arrays, just append items not already in the array
+							newItems := false
+							for _, updateItem := range updateArray {
+								found := false
+								for _, actualItem := range actualArray {
+									if reflect.DeepEqual(actualItem, updateItem) {
+										found = true
+										break
+									}
+								}
+								if !found {
+									actualArray = append(actualArray, updateItem)
+									newItems = true
+								}
+							}
+							if newItems {
+								body[key] = actualArray
+								modified = true
+							}
 						}
 					}
 				} else if replace {
@@ -517,6 +560,25 @@ func mergeStructure(body map[string]interface{}, update map[string]interface{}, 
 	}
 
 	return modified
+}
+
+// isKeyValueArray checks if an array contains key-value pairs (strings with "=")
+func isKeyValueArray(arr []interface{}) bool {
+	if len(arr) == 0 {
+		return false
+	}
+
+	for _, item := range arr {
+		if str, ok := item.(string); ok {
+			if !strings.Contains(str, "=") {
+				return false
+			}
+		} else {
+			return false
+		}
+	}
+
+	return true
 }
 
 // isReplacementCandidate determines if an actual item should be replaced by an update item

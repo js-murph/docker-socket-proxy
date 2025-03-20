@@ -85,7 +85,15 @@ func main() {
 		},
 	}
 
-	socketCmd.AddCommand(createCmd, deleteCmd, listCmd, describeCmd)
+	var cleanCmd = &cobra.Command{
+		Use:   "clean",
+		Short: "Remove all proxy sockets",
+		Run: func(cmd *cobra.Command, args []string) {
+			cli.RunClean(paths)
+		},
+	}
+
+	socketCmd.AddCommand(createCmd, deleteCmd, listCmd, describeCmd, cleanCmd)
 	rootCmd.AddCommand(daemonCmd, socketCmd)
 
 	var logLevel string

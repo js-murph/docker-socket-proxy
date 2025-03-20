@@ -247,3 +247,51 @@ func TestRunDescribe(t *testing.T) {
 		t.Errorf("Expected output to contain YAML config, got: %s", output)
 	}
 }
+
+func TestRunClean(t *testing.T) {
+	// Create a temporary directory for the test socket
+	tmpDir, err := os.MkdirTemp("", "docker-proxy-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create a mock Unix socket server
+	socketPath := filepath.Join(tmpDir, "test.sock")
+	l, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+
+	// Create a test server
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "DELETE" {
+			t.Errorf("Expected DELETE request, got %s", r.Method)
+		}
+		if r.URL.Path != "/sockets" {
+			t.Errorf("Expected /sockets path, got %s", r.URL.Path)
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("All sockets have been removed successfully"))
+	}))
+	server.Listener = l
+	server.Start()
+	defer server.Close()
+
+	// Set up paths
+	paths := &management.SocketPaths{
+		Management: socketPath,
+	}
+
+	// Capture stdout
+	output := captureOutput(func() {
+		RunClean(paths)
+	})
+
+	// Check output
+	if !strings.Contains(output, "All sockets have been removed successfully") {
+		t.Errorf("Expected output to contain success message, got: %s", output)
+	}
+}
