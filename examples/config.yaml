@@ -19,15 +19,10 @@ rules:
       reason: "Blocked creation of containers with restricted env variables"
 
     - match:
-        path: "/_.*"
-        method: ".*"
-      action: "allow"
-      reason: "Allow metadata requests"
-
-    - match:
         path: "/.*"
         method: ".*"
       action: "allow"
+      reason: "Allow all other requests, the default is to block everything"
 
   rewrites:
     - match:

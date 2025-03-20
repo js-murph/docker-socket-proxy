@@ -1,0 +1,14 @@
+[Unit]
+Description=Docker Socket Proxy
+Documentation=https://github.com/js-murph/docker-socket-proxy
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/docker-socket-proxy daemon
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
