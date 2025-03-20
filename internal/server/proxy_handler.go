@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -240,26 +241,46 @@ func (h *ProxyHandler) ruleMatches(r *http.Request, match config.Match) bool {
 
 // getNestedValue gets a nested value from a map using dot notation
 func getNestedValue(data map[string]interface{}, path string) (interface{}, bool) {
+	log := logging.GetLogger()
 	parts := strings.Split(path, ".")
 	current := data
+
+	log.Debug("Getting nested value", "path", path, "data_keys", getMapKeys(current))
 
 	// Navigate through the nested structure
 	for i, part := range parts {
 		if i == len(parts)-1 {
 			// Last part, return the value
 			val, exists := current[part]
+			if exists {
+				log.Debug("Found value", "path", path, "value", val)
+			} else {
+				log.Debug("Value not found", "path", path, "current_keys", getMapKeys(current))
+			}
 			return val, exists
 		}
 
 		// Not the last part, navigate deeper
 		next, exists := current[part]
 		if !exists {
+			log.Debug("Path segment not found", "segment", part, "current_keys", getMapKeys(current))
 			return nil, false
 		}
 
 		// Check if the next level is a map
 		nextMap, ok := next.(map[string]interface{})
 		if !ok {
+			// Try to convert from json.RawMessage or other types
+			log.Debug("Not a map, trying to convert", "type", reflect.TypeOf(next))
+
+			// If it's a slice of interfaces, check if it contains maps
+			if sliceVal, isSlice := next.([]interface{}); isSlice {
+				// For Docker API, Env is often a slice of strings
+				if part == "Env" {
+					return sliceVal, true
+				}
+			}
+
 			return nil, false
 		}
 
@@ -269,48 +290,55 @@ func getNestedValue(data map[string]interface{}, path string) (interface{}, bool
 	return nil, false
 }
 
+// Helper function to get map keys for debugging
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 // containsValue checks if a value contains another value
 // This handles various types including strings, arrays, and maps
 func containsValue(actual interface{}, expected interface{}) bool {
+	log := logging.GetLogger()
+
 	// Handle nil values
 	if actual == nil {
 		return expected == nil
 	}
 
+	log.Debug("Checking contains",
+		"actual_type", reflect.TypeOf(actual),
+		"expected_type", reflect.TypeOf(expected))
+
 	// Handle different types
 	switch actualVal := actual.(type) {
 	case []interface{}:
 		// For arrays, check if any element matches the expected value
-		for _, item := range actualVal {
-			if item == expected {
-				return true
-			}
 
-			// If expected is a string and item is a string, check for substring
-			expectedStr, expectedIsStr := expected.(string)
-			itemStr, itemIsStr := item.(string)
-			if expectedIsStr && itemIsStr && strings.Contains(itemStr, expectedStr) {
-				return true
-			}
-		}
-
-		// For arrays of strings, check if any string contains the expected value
-		if expectedStr, ok := expected.(string); ok {
-			for _, item := range actualVal {
-				if itemStr, ok := item.(string); ok {
-					if strings.Contains(itemStr, expectedStr) {
-						return true
+		// Special handling for Docker API Env variables which are strings like "KEY=VALUE"
+		if expectedSlice, ok := expected.([]interface{}); ok {
+			// If expected is also a slice, check if all items in expected are in actual
+			for _, expectedItem := range expectedSlice {
+				found := false
+				for _, actualItem := range actualVal {
+					if containsValue(actualItem, expectedItem) {
+						found = true
+						break
 					}
 				}
+				if !found {
+					return false
+				}
 			}
+			return true
 		}
 
-		return false
-
-	case map[string]interface{}:
-		// For maps, check if any value matches the expected value
-		for _, value := range actualVal {
-			if value == expected {
+		// If expected is a single value, check if it's in the array
+		for _, item := range actualVal {
+			if containsValue(item, expected) {
 				return true
 			}
 		}
@@ -319,12 +347,16 @@ func containsValue(actual interface{}, expected interface{}) bool {
 	case string:
 		// For strings, check if it contains the expected value as a substring
 		if expectedStr, ok := expected.(string); ok {
-			return strings.Contains(actualVal, expectedStr)
+			// For Docker API Env variables which are in format "KEY=VALUE"
+			if strings.Contains(actualVal, expectedStr) {
+				log.Debug("String contains match", "actual", actualVal, "expected", expectedStr)
+				return true
+			}
 		}
 		return actual == expected
 
 	default:
 		// For other types, check for equality
-		return actual == expected
+		return reflect.DeepEqual(actual, expected)
 	}
 }
