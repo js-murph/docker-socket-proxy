@@ -302,62 +302,102 @@ func matchesContains(body map[string]interface{}, contains map[string]interface{
 
 // containsValue checks if a value contains another value
 // This handles various types including strings, arrays, and maps
-func containsValue(actual interface{}, expected interface{}) bool {
-	log := logging.GetLogger()
+func containsValue(actual, expected interface{}) bool {
 
 	// Handle nil values
-	if actual == nil {
-		return expected == nil
+	if actual == nil && expected == nil {
+		return true
+	}
+	if actual == nil || expected == nil {
+		return false
 	}
 
-	log.Debug("Checking contains",
-		"actual_type", reflect.TypeOf(actual),
-		"expected_type", reflect.TypeOf(expected))
-
 	// Handle different types
-	switch actualVal := actual.(type) {
-	case []interface{}:
-		// For arrays, check if any element matches the expected value
+	switch expectedVal := expected.(type) {
+	case string:
+		// Check if the string contains regex metacharacters
+		hasRegexChars := strings.ContainsAny(expectedVal, "^$.*+?()[]{}|\\")
 
-		// Special handling for Docker API Env variables which are strings like "KEY=VALUE"
-		if expectedSlice, ok := expected.([]interface{}); ok {
-			// If expected is also a slice, check if all items in expected are in actual
-			for _, expectedItem := range expectedSlice {
-				found := false
-				for _, actualItem := range actualVal {
-					if containsValue(actualItem, expectedItem) {
-						found = true
-						break
+		// For string values
+		if actualStr, ok := actual.(string); ok {
+			if hasRegexChars {
+				// Try as regex first
+				matched, err := regexp.MatchString(expectedVal, actualStr)
+				if err == nil && matched {
+					return true
+				}
+				// Fall back to regular contains if regex fails
+			}
+			return strings.Contains(actualStr, expectedVal)
+		}
+
+		// For array values, check if any element matches
+		if actualArray, ok := actual.([]interface{}); ok {
+			for _, item := range actualArray {
+				if itemStr, ok := item.(string); ok {
+					if hasRegexChars {
+						// Try as regex first
+						matched, err := regexp.MatchString(expectedVal, itemStr)
+						if err == nil && matched {
+							return true
+						}
+						// Fall back to regular contains if regex fails
+					}
+					if strings.Contains(itemStr, expectedVal) {
+						return true
 					}
 				}
-				if !found {
-					return false
-				}
 			}
+			return false
+		}
+
+		return false
+
+	case []interface{}:
+		// Check if actual is an array
+		actualArray, ok := actual.([]interface{})
+		if !ok {
+			return false
+		}
+
+		// Empty array case
+		if len(expectedVal) == 0 && len(actualArray) == 0 {
 			return true
 		}
 
-		// If expected is a single value, check if it's in the array
-		for _, item := range actualVal {
-			if containsValue(item, expected) {
-				return true
+		// Check if all expected items are in the actual array
+		for _, expectedItem := range expectedVal {
+			found := false
+			for _, actualItem := range actualArray {
+				if containsValue(actualItem, expectedItem) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return false
 			}
 		}
-		return false
+		return true
 
-	case string:
-		// For strings, check if it contains the expected value as a substring
-		if expectedStr, ok := expected.(string); ok {
-			// For Docker API Env variables which are in format "KEY=VALUE"
-			if strings.Contains(actualVal, expectedStr) {
-				log.Debug("String contains match", "actual", actualVal, "expected", expectedStr)
-				return true
+	case map[string]interface{}:
+		// Check if actual is a map
+		actualMap, ok := actual.(map[string]interface{})
+		if !ok {
+			return false
+		}
+
+		// Check if all expected key-value pairs are in the actual map
+		for key, expectedMapVal := range expectedVal {
+			actualMapVal, exists := actualMap[key]
+			if !exists || !containsValue(actualMapVal, expectedMapVal) {
+				return false
 			}
 		}
-		return actual == expected
+		return true
 
 	default:
-		// For other types, check for equality
+		// For other types, use direct equality
 		return reflect.DeepEqual(actual, expected)
 	}
 }

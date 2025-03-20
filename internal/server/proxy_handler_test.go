@@ -688,6 +688,36 @@ func TestContainsValue(t *testing.T) {
 			expected: "DEBUG",
 			want:     true,
 		},
+		{
+			name:     "regex match in string",
+			actual:   "DEBUG_LEVEL=verbose",
+			expected: "DEBUG.*verbose",
+			want:     true,
+		},
+		{
+			name:     "regex no match in string",
+			actual:   "APP=test",
+			expected: "DEBUG.*",
+			want:     false,
+		},
+		{
+			name:     "regex match in array",
+			actual:   []interface{}{"DEBUG_LEVEL=verbose", "APP=test"},
+			expected: "DEBUG.*verbose",
+			want:     true,
+		},
+		{
+			name:     "simple string still works",
+			actual:   "DEBUG=true",
+			expected: "DEBUG",
+			want:     true,
+		},
+		{
+			name:     "escaped regex characters treated as literal",
+			actual:   "value with * asterisk",
+			expected: "with \\* ast",
+			want:     true,
+		},
 	}
 
 	for _, tt := range tests {
