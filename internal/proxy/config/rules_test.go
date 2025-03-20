@@ -239,3 +239,73 @@ func TestGetPropagationRules(t *testing.T) {
 		t.Errorf("expected value %v, got %v", expectedValue, pattern.Value)
 	}
 }
+
+func TestValidateACLRuleWithRegex(t *testing.T) {
+	tests := []struct {
+		name    string
+		rule    Rule
+		wantErr bool
+	}{
+		{
+			name: "valid rule with regex path",
+			rule: Rule{
+				Match: Match{
+					Path: "/v1\\.[0-9]+/containers/.*",
+				},
+				Action: "allow",
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid rule with regex method",
+			rule: Rule{
+				Match: Match{
+					Path:   "/test",
+					Method: "GET|POST",
+				},
+				Action: "allow",
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid rule with complex regex",
+			rule: Rule{
+				Match: Match{
+					Path:   "/v1\\.[0-9]+/(containers|networks)/.*",
+					Method: "^(GET|POST|PUT)$",
+				},
+				Action: "allow",
+			},
+			wantErr: false,
+		},
+		{
+			name: "deny rule without reason",
+			rule: Rule{
+				Match: Match{
+					Path: "/test/.*",
+				},
+				Action: "deny",
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid action",
+			rule: Rule{
+				Match: Match{
+					Path: "/test/.*",
+				},
+				Action: "invalid",
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateACLRule(0, tt.rule)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateACLRule() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}

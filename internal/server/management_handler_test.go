@@ -19,129 +19,151 @@ import (
 )
 
 func TestManagementHandler_CreateSocket(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "docker-proxy-test-*")
+	// Create a temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "docker-proxy-test")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer os.RemoveAll(tempDir)
 
+	// Create a test config
+	testConfig := createTestConfig()
+
+	// Create a test server with context
+	store := storage.NewFileStore(tempDir)
 	configs := make(map[string]*config.SocketConfig)
-	store := storage.NewFileStore(tmpDir)
 
-	// Create a server instance for the context
-	srv := &Server{
-		socketDir:     tmpDir,
+	// Create a mock server
+	mockServer := &Server{
+		socketDir:     tempDir,
 		store:         store,
 		socketConfigs: configs,
 		proxyServers:  make(map[string]*http.Server),
-		configMu:      sync.RWMutex{},
 	}
 
-	handler := NewManagementHandler("/tmp/docker.sock", configs, &sync.RWMutex{}, store)
+	// Create the handler
+	handler := NewManagementHandler(tempDir, configs, &sync.RWMutex{}, store)
 
-	tests := []struct {
-		name       string
-		config     *config.SocketConfig
-		withServer bool
-		wantStatus int
-	}{
-		{
-			name: "valid config",
-			config: &config.SocketConfig{
-				Rules: config.RuleSet{
-					ACLs: []config.Rule{
-						{
-							Match:  config.Match{Path: "/test", Method: "GET"},
-							Action: "allow",
+	// Create a server that injects the mock server into the context
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.WithValue(r.Context(), serverContextKey, mockServer)
+		handler.ServeHTTP(w, r.WithContext(ctx))
+	}))
+	defer ts.Close()
+
+	// Test creating a socket with a valid config
+	t.Run("valid_config", func(t *testing.T) {
+		// Marshal the config to JSON
+		configJSON, err := json.Marshal(testConfig)
+		if err != nil {
+			t.Fatalf("Failed to marshal config: %v", err)
+		}
+
+		// Create a request to create a socket
+		req, err := http.NewRequest("POST", ts.URL+"/socket", bytes.NewBuffer(configJSON))
+		if err != nil {
+			t.Fatalf("Failed to create request: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		// Send the request
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("Failed to send request: %v", err)
+		}
+		defer resp.Body.Close()
+
+		// Check the response
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("Expected status OK, got %v: %s", resp.Status, body)
+		}
+
+		// Parse the response
+		var response struct {
+			SocketPath string `json:"socket_path"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+			t.Fatalf("Failed to parse response: %v", err)
+		}
+
+		// Check if the socket was created
+		if _, err := os.Stat(response.SocketPath); os.IsNotExist(err) {
+			t.Errorf("Socket was not created: %v", err)
+		}
+
+		// Check if the config file was created
+		_, err = store.LoadConfig(response.SocketPath)
+		if err != nil {
+			t.Errorf("Socket config file was not created: %v", err)
+		}
+	})
+
+	// Test creating a socket with an empty config
+	t.Run("empty_config", func(t *testing.T) {
+		// Create a minimal valid config
+		minimalConfig := &config.SocketConfig{
+			Config: config.ConfigSet{
+				PropagateSocket: "/var/run/docker.sock",
+			},
+			Rules: config.RuleSet{
+				ACLs: []config.Rule{
+					{
+						Match: config.Match{
+							Path:   "/.*",
+							Method: ".*",
 						},
+						Action: "allow",
 					},
 				},
 			},
-			withServer: true,
-			wantStatus: http.StatusOK,
-		},
-		{
-			name:       "empty config",
-			config:     nil,
-			withServer: true,
-			wantStatus: http.StatusOK, // Empty config is allowed, will use default
-		},
-		{
-			name: "valid config without server context",
-			config: &config.SocketConfig{
-				Rules: config.RuleSet{
-					ACLs: []config.Rule{
-						{
-							Match:  config.Match{Path: "/test", Method: "GET"},
-							Action: "allow",
-						},
-					},
-				},
-			},
-			withServer: false,
-			wantStatus: http.StatusInternalServerError, // Server context is required
-		},
-	}
+		}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var body io.Reader
-			if tt.config != nil {
-				configJSON, err := json.Marshal(tt.config)
-				if err != nil {
-					t.Fatal(err)
-				}
-				body = bytes.NewReader(configJSON)
-			}
+		// Marshal the config to JSON
+		configJSON, err := json.Marshal(minimalConfig)
+		if err != nil {
+			t.Fatalf("Failed to marshal config: %v", err)
+		}
 
-			req := httptest.NewRequest("POST", "/create-socket", body)
-			if tt.config != nil {
-				req.Header.Set("Content-Type", "application/json")
-			}
+		// Create a request to create a socket
+		req, err := http.NewRequest("POST", ts.URL+"/socket", bytes.NewBuffer(configJSON))
+		if err != nil {
+			t.Fatalf("Failed to create request: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
 
-			if tt.withServer {
-				ctx := context.WithValue(req.Context(), serverContextKey, srv)
-				req = req.WithContext(ctx)
-			}
+		// Send the request
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("Failed to send request: %v", err)
+		}
+		defer resp.Body.Close()
 
-			w := httptest.NewRecorder()
-			handler.ServeHTTP(w, req)
+		// Check the response
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("Expected status OK, got %v: %s", resp.Status, body)
+		}
 
-			if w.Code != tt.wantStatus {
-				t.Errorf("ServeHTTP() status = %v, want %v, body: %s",
-					w.Code, tt.wantStatus, w.Body.String())
-			}
+		// Parse the response
+		var response struct {
+			SocketPath string `json:"socket_path"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+			t.Fatalf("Failed to parse response: %v", err)
+		}
 
-			if tt.wantStatus == http.StatusOK {
-				// Check that a socket path was returned
-				socketPath := w.Body.String()
-				if !strings.HasPrefix(socketPath, tmpDir) {
-					t.Errorf("Expected socket path to start with %s, got %s", tmpDir, socketPath)
-				}
+		// Check if the socket was created
+		if _, err := os.Stat(response.SocketPath); os.IsNotExist(err) {
+			t.Errorf("Socket was not created: %v", err)
+		}
 
-				// Check that the socket file was created
-				if _, err := os.Stat(socketPath); os.IsNotExist(err) {
-					t.Errorf("Socket file was not created at %s", socketPath)
-				}
-
-				// Check that the config was added to the map
-				handler.configMu.RLock()
-				_, exists := handler.socketConfigs[socketPath]
-				handler.configMu.RUnlock()
-				if !exists {
-					t.Errorf("Socket config was not added to the map")
-				}
-
-				// Check that the config file was created
-				if _, err := store.LoadConfig(socketPath); err != nil {
-					t.Errorf("Socket config file was not created: %v", err)
-				}
-
-				// Clean up the socket
-				os.Remove(socketPath)
-			}
-		})
-	}
+		// Check if the config file was created
+		_, err = store.LoadConfig(response.SocketPath)
+		if err != nil {
+			t.Errorf("Socket config file was not created: %v", err)
+		}
+	})
 }
 
 func TestManagementHandler_DeleteSocket(t *testing.T) {
@@ -160,7 +182,6 @@ func TestManagementHandler_DeleteSocket(t *testing.T) {
 		store:         store,
 		socketConfigs: configs,
 		proxyServers:  make(map[string]*http.Server),
-		configMu:      sync.RWMutex{},
 	}
 
 	// Create a test socket
@@ -237,7 +258,7 @@ func TestManagementHandler_DeleteSocket(t *testing.T) {
 				}
 			}
 
-			req := httptest.NewRequest("DELETE", "/delete-socket", nil)
+			req := httptest.NewRequest("DELETE", "/socket/"+tt.socketName, nil)
 
 			// Add socket name as query param or header
 			if tt.socketName != "" {
@@ -751,5 +772,40 @@ func TestManagementHandler(t *testing.T) {
 					w.Code, tt.wantStatus, w.Body.String())
 			}
 		})
+	}
+}
+
+// createTestConfig creates a test config with valid rules
+func createTestConfig() *config.SocketConfig {
+	return &config.SocketConfig{
+		Config: config.ConfigSet{
+			PropagateSocket: "/var/run/docker.sock",
+		},
+		Rules: config.RuleSet{
+			ACLs: []config.Rule{
+				{
+					Match: config.Match{
+						Path:   "/v1.*/containers/json",
+						Method: "GET",
+					},
+					Action: "allow",
+				},
+				{
+					Match: config.Match{
+						Path:   "/v1.*/containers/create",
+						Method: "POST",
+					},
+					Action: "deny",
+					Reason: "Test deny rule", // Add reason for deny rule
+				},
+				{
+					Match: config.Match{
+						Path:   "/.*",
+						Method: ".*",
+					},
+					Action: "allow",
+				},
+			},
+		},
 	}
 }

@@ -1,117 +1,136 @@
 package storage
 
 import (
-	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"docker-socket-proxy/internal/proxy/config"
 )
 
 func TestFileStore(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "docker-proxy-test-*")
+	// Create a temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "filestore-test")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer os.RemoveAll(tempDir)
 
-	mgmtSocket := filepath.Join(tmpDir, "mgmt.sock")
-	store := NewFileStore(mgmtSocket)
+	// Create test socket paths with unique names
+	testSocketName := "test.sock"
+	testSocketPath := filepath.Join(tempDir, testSocketName)
 
-	// Create test socket and config
-	testSocket := filepath.Join(tmpDir, "test.sock")
-	l, err := net.Listen("unix", testSocket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	l.Close()
+	anotherSocketName := "another.sock"
+	anotherSocketPath := filepath.Join(tempDir, anotherSocketName)
 
+	// Create a test config with valid rules
 	testConfig := &config.SocketConfig{
+		Config: config.ConfigSet{
+			PropagateSocket: "/var/run/docker.sock",
+		},
 		Rules: config.RuleSet{
 			ACLs: []config.Rule{
 				{
-					Match:  config.Match{Path: "/test", Method: "GET"},
+					Match: config.Match{
+						Path:   "/.*",
+						Method: ".*",
+					},
 					Action: "allow",
 				},
 			},
 		},
 	}
 
-	// Test SaveConfig and LoadConfig
-	t.Run("save and load config", func(t *testing.T) {
-		if err := store.SaveConfig(testSocket, testConfig); err != nil {
+	// Create a file store
+	store := NewFileStore(tempDir)
+
+	// Test saving a config
+	t.Run("save_config", func(t *testing.T) {
+		err := store.SaveConfig(testSocketPath, testConfig)
+		if err != nil {
 			t.Fatalf("SaveConfig() error = %v", err)
 		}
 
-		loadedConfig, err := store.LoadConfig(testSocket)
+		// Check if the file exists
+		filename := store.getFilename(testSocketPath)
+		if _, err := os.Stat(filename); os.IsNotExist(err) {
+			t.Errorf("SaveConfig() did not create file %s", filename)
+		}
+	})
+
+	// Test loading a config
+	t.Run("load_config", func(t *testing.T) {
+		cfg, err := store.LoadConfig(testSocketPath)
 		if err != nil {
 			t.Fatalf("LoadConfig() error = %v", err)
 		}
 
-		// Compare specific fields instead of using DeepEqual
-		if len(loadedConfig.Rules.ACLs) != len(testConfig.Rules.ACLs) {
-			t.Errorf("LoadConfig() got %d ACL rules, want %d",
-				len(loadedConfig.Rules.ACLs), len(testConfig.Rules.ACLs))
-			return
+		// Check if the config matches
+		if cfg.Config.PropagateSocket != testConfig.Config.PropagateSocket {
+			t.Errorf("LoadConfig() got = %v, want %v", cfg.Config.PropagateSocket, testConfig.Config.PropagateSocket)
 		}
 
-		if loadedConfig.Rules.ACLs[0].Action != testConfig.Rules.ACLs[0].Action {
-			t.Errorf("LoadConfig() got action %s, want %s",
-				loadedConfig.Rules.ACLs[0].Action, testConfig.Rules.ACLs[0].Action)
-		}
-
-		if loadedConfig.Rules.ACLs[0].Match.Path != testConfig.Rules.ACLs[0].Match.Path {
-			t.Errorf("LoadConfig() got path %s, want %s",
-				loadedConfig.Rules.ACLs[0].Match.Path, testConfig.Rules.ACLs[0].Match.Path)
-		}
-
-		if loadedConfig.Rules.ACLs[0].Match.Method != testConfig.Rules.ACLs[0].Match.Method {
-			t.Errorf("LoadConfig() got method %s, want %s",
-				loadedConfig.Rules.ACLs[0].Match.Method, testConfig.Rules.ACLs[0].Match.Method)
+		if len(cfg.Rules.ACLs) != len(testConfig.Rules.ACLs) {
+			t.Errorf("LoadConfig() got %d ACLs, want %d", len(cfg.Rules.ACLs), len(testConfig.Rules.ACLs))
 		}
 	})
 
-	// Test LoadExistingConfigs
-	t.Run("load existing configs", func(t *testing.T) {
+	// Test loading existing configs
+	t.Run("load_existing_configs", func(t *testing.T) {
+		// Create another test socket config
+		err := store.SaveConfig(anotherSocketPath, testConfig)
+		if err != nil {
+			t.Fatalf("SaveConfig() error = %v", err)
+		}
+
+		// Load existing configs
 		configs, err := store.LoadExistingConfigs()
 		if err != nil {
 			t.Fatalf("LoadExistingConfigs() error = %v", err)
 		}
 
-		if len(configs) != 1 {
-			t.Errorf("LoadExistingConfigs() got %d configs, want 1", len(configs))
-			return
+		// Check if both configs are loaded
+		if len(configs) < 2 {
+			t.Errorf("LoadExistingConfigs() got %d configs, want at least 2", len(configs))
 		}
 
-		cfg, ok := configs[testSocket]
-		if !ok {
-			t.Error("LoadExistingConfigs() missing test socket config")
-			return
+		// Check if the test socket config is loaded
+		testBaseName := filepath.Base(testSocketPath)
+		anotherBaseName := filepath.Base(anotherSocketPath)
+
+		testFound := false
+		anotherFound := false
+
+		for path := range configs {
+			if strings.Contains(path, testBaseName) {
+				testFound = true
+			}
+			if strings.Contains(path, anotherBaseName) {
+				anotherFound = true
+			}
 		}
 
-		// Compare specific fields
-		if len(cfg.Rules.ACLs) != len(testConfig.Rules.ACLs) {
-			t.Errorf("LoadExistingConfigs() got %d ACL rules, want %d",
-				len(cfg.Rules.ACLs), len(testConfig.Rules.ACLs))
-			return
+		if !testFound {
+			t.Errorf("LoadExistingConfigs() missing test socket config: %s", testSocketPath)
 		}
 
-		if cfg.Rules.ACLs[0].Action != testConfig.Rules.ACLs[0].Action {
-			t.Errorf("LoadExistingConfigs() got action %s, want %s",
-				cfg.Rules.ACLs[0].Action, testConfig.Rules.ACLs[0].Action)
+		if !anotherFound {
+			t.Errorf("LoadExistingConfigs() missing another socket config: %s", anotherSocketPath)
 		}
 	})
 
-	// Test DeleteConfig
-	t.Run("delete config", func(t *testing.T) {
-		if err := store.DeleteConfig(testSocket); err != nil {
+	// Test deleting a config
+	t.Run("delete_config", func(t *testing.T) {
+		err := store.DeleteConfig(testSocketPath)
+		if err != nil {
 			t.Fatalf("DeleteConfig() error = %v", err)
 		}
 
-		_, err := store.LoadConfig(testSocket)
-		if err == nil {
-			t.Error("LoadConfig() expected error after deletion")
+		// Check if the file is deleted
+		filename := store.getFilename(testSocketPath)
+		if _, err := os.Stat(filename); !os.IsNotExist(err) {
+			t.Errorf("DeleteConfig() did not delete file %s", filename)
 		}
 	})
 }

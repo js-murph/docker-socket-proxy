@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -321,4 +322,85 @@ func createTestRequest(body map[string]interface{}) *http.Request {
 	req, _ := http.NewRequest("POST", "/v1.42/containers/create", bytes.NewBuffer(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
 	return req
+}
+
+func TestRegexMatch(t *testing.T) {
+	tests := []struct {
+		name   string
+		path   string
+		method string
+		rule   struct {
+			path   string
+			method string
+		}
+		want bool
+	}{
+		{
+			name:   "exact match both",
+			path:   "/v1.42/containers/json",
+			method: "GET",
+			rule:   struct{ path, method string }{path: "^/v1\\.42/containers/json$", method: "^GET$"},
+			want:   true,
+		},
+		{
+			name:   "regex path",
+			path:   "/v1.42/containers/json",
+			method: "GET",
+			rule:   struct{ path, method string }{path: "^/v1\\.[0-9]+/containers/.*$", method: "^GET$"},
+			want:   true,
+		},
+		{
+			name:   "regex method",
+			path:   "/v1.42/containers/json",
+			method: "GET",
+			rule:   struct{ path, method string }{path: "^/v1\\.42/containers/json$", method: "^(GET|POST)$"},
+			want:   true,
+		},
+		{
+			name:   "regex both",
+			path:   "/v1.42/containers/json",
+			method: "GET",
+			rule:   struct{ path, method string }{path: "^/.*$", method: "^.*$"},
+			want:   true,
+		},
+		{
+			name:   "no match path",
+			path:   "/v1.42/containers/json",
+			method: "GET",
+			rule:   struct{ path, method string }{path: "^/v1\\.42/networks/.*$", method: "^GET$"},
+			want:   false,
+		},
+		{
+			name:   "no match method",
+			path:   "/v1.42/containers/json",
+			method: "GET",
+			rule:   struct{ path, method string }{path: "^/v1\\.42/containers/json$", method: "^POST$"},
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a mock request with the specified path and method
+			r := &http.Request{
+				Method: tt.method,
+				URL: &url.URL{
+					Path: tt.path,
+				},
+			}
+
+			// Create a mock match
+			match := config.Match{
+				Path:   tt.rule.path,
+				Method: tt.rule.method,
+			}
+
+			// Create a handler to test the rule matching
+			handler := &ProxyHandler{}
+
+			if got := handler.ruleMatches(r, match); got != tt.want {
+				t.Errorf("ruleMatches() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }

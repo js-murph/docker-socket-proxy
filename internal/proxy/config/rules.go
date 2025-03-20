@@ -44,11 +44,12 @@ type Rule struct {
 }
 
 type Match struct {
-	Path     string                 `yaml:"path,omitempty"`
-	Method   string                 `yaml:"method,omitempty"`
-	Contains map[string]interface{} `yaml:"contains,omitempty"`
+	Path     string                 `yaml:"path,omitempty" json:"path,omitempty"`
+	Method   string                 `yaml:"method,omitempty" json:"method,omitempty"`
+	Contains map[string]interface{} `yaml:"contains,omitempty" json:"contains,omitempty"`
 }
 
+// ValidateConfig validates the socket configuration
 func ValidateConfig(config *SocketConfig) error {
 	if config == nil {
 		return fmt.Errorf("configuration cannot be nil")
@@ -87,22 +88,6 @@ func validateACLRule(i int, rule Rule) error {
 		return fmt.Errorf("rule %d: at least one match criteria (path, method, or contains) must be specified", i)
 	}
 
-	// Validate method if specified
-	if rule.Match.Method != "" {
-		validMethods := map[string]bool{
-			"GET": true, "POST": true, "PUT": true,
-			"DELETE": true, "PATCH": true, "HEAD": true,
-		}
-		if !validMethods[rule.Match.Method] {
-			return fmt.Errorf("rule %d: invalid HTTP method '%s'", i, rule.Match.Method)
-		}
-	}
-
-	// Validate path format if specified
-	if rule.Match.Path != "" && rule.Match.Path[0] != '/' {
-		return fmt.Errorf("rule %d: path must start with '/', got '%s'", i, rule.Match.Path)
-	}
-
 	// Require reason for deny rules
 	if rule.Action == "deny" && rule.Reason == "" {
 		return fmt.Errorf("rule %d: deny rules must specify a reason", i)
@@ -117,22 +102,6 @@ func validateRewriteRule(i int, rule RewriteRule) error {
 		return fmt.Errorf("rewrite rule %d: at least one match criteria (path, method, or contains) must be specified", i)
 	}
 
-	// Validate method if specified
-	if rule.Match.Method != "" {
-		validMethods := map[string]bool{
-			"GET": true, "POST": true, "PUT": true,
-			"DELETE": true, "PATCH": true, "HEAD": true,
-		}
-		if !validMethods[rule.Match.Method] {
-			return fmt.Errorf("rewrite rule %d: invalid HTTP method '%s'", i, rule.Match.Method)
-		}
-	}
-
-	// Validate path format if specified
-	if rule.Match.Path != "" && rule.Match.Path[0] != '/' {
-		return fmt.Errorf("rewrite rule %d: path must start with '/', got '%s'", i, rule.Match.Path)
-	}
-
 	// Validate patterns
 	if len(rule.Patterns) == 0 {
 		return fmt.Errorf("rewrite rule %d: at least one pattern must be specified", i)
@@ -140,69 +109,23 @@ func validateRewriteRule(i int, rule RewriteRule) error {
 
 	for j, pattern := range rule.Patterns {
 		if pattern.Field == "" {
-			return fmt.Errorf("rewrite rule %d, pattern %d: field cannot be empty", i, j)
+			return fmt.Errorf("rewrite rule %d, pattern %d: field must be specified", i, j)
 		}
 
-		if pattern.Action == "" {
-			pattern.Action = "replace" // Default action
+		if pattern.Action != "replace" && pattern.Action != "upsert" && pattern.Action != "delete" {
+			return fmt.Errorf("rewrite rule %d, pattern %d: action must be 'replace', 'upsert', or 'delete', got '%s'", i, j, pattern.Action)
 		}
 
-		validActions := map[string]bool{
-			"replace": true,
-			"upsert":  true,
-			"delete":  true,
-		}
-		if !validActions[pattern.Action] {
-			return fmt.Errorf("rewrite rule %d, pattern %d: invalid action '%s'", i, j, pattern.Action)
+		if pattern.Action == "replace" && pattern.Match == nil {
+			return fmt.Errorf("rewrite rule %d, pattern %d: replace action requires a match value", i, j)
 		}
 
-		if pattern.Action != "delete" {
-			if pattern.Value == nil {
-				return fmt.Errorf("rewrite rule %d, pattern %d: value must be specified for non-delete actions", i, j)
-			}
-
-			// Match is only required for replace action
-			if pattern.Action == "replace" && pattern.Match == nil {
-				return fmt.Errorf("rewrite rule %d, pattern %d: match value must be specified for replace action", i, j)
-			}
-
-			// Validate type compatibility
-			if pattern.Match != nil && !validateTypeCompatibility(pattern.Match, pattern.Value) {
-				return fmt.Errorf("rewrite rule %d, pattern %d: match and value must be of compatible types", i, j)
-			}
-		} else if pattern.Match != nil && !validateMatchType(pattern.Match) {
-			return fmt.Errorf("rewrite rule %d, pattern %d: invalid match type for delete action", i, j)
+		if pattern.Action != "delete" && pattern.Value == nil {
+			return fmt.Errorf("rewrite rule %d, pattern %d: %s action requires a value", i, j, pattern.Action)
 		}
 	}
 
 	return nil
-}
-
-func validateTypeCompatibility(match, value interface{}) bool {
-	switch match.(type) {
-	case string:
-		_, ok := value.(string)
-		return ok
-	case bool:
-		_, ok := value.(bool)
-		return ok
-	case float64:
-		_, ok := value.(float64)
-		return ok
-	case []interface{}:
-		_, ok := value.([]interface{})
-		return ok
-	}
-	return reflect.TypeOf(match) == reflect.TypeOf(value)
-}
-
-func validateMatchType(match interface{}) bool {
-	switch match.(type) {
-	case string, bool:
-		return true
-	default:
-		return false
-	}
 }
 
 func LoadSocketConfig(path string) (*SocketConfig, error) {

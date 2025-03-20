@@ -309,3 +309,136 @@ func (h *TestProxyHandler) ruleMatches(r *http.Request, match config.Match) bool
 
 	return true
 }
+
+func TestRegexMatching(t *testing.T) {
+	// Create a handler for testing
+	handler := NewProxyHandler("/tmp/docker.sock", nil, &sync.RWMutex{})
+
+	tests := []struct {
+		name   string
+		path   string
+		method string
+		match  config.Match
+		want   bool
+	}{
+		// Path regex tests
+		{
+			name:   "exact path match",
+			path:   "/v1.42/containers/json",
+			method: "GET",
+			match:  config.Match{Path: "/v1.42/containers/json"},
+			want:   true,
+		},
+		{
+			name:   "path regex with version",
+			path:   "/v1.42/containers/json",
+			method: "GET",
+			match:  config.Match{Path: "/v1\\.[0-9]+/containers/json"},
+			want:   true,
+		},
+		{
+			name:   "path regex with wildcard",
+			path:   "/v1.42/containers/json",
+			method: "GET",
+			match:  config.Match{Path: "/v1\\.[0-9]+/containers/.*"},
+			want:   true,
+		},
+		{
+			name:   "path regex no match",
+			path:   "/v1.42/containers/json",
+			method: "GET",
+			match:  config.Match{Path: "/v1\\.[0-9]+/networks/.*"},
+			want:   false,
+		},
+
+		// Method regex tests
+		{
+			name:   "exact method match",
+			path:   "/v1.42/containers/json",
+			method: "GET",
+			match:  config.Match{Method: "GET"},
+			want:   true,
+		},
+		{
+			name:   "method regex OR",
+			path:   "/v1.42/containers/json",
+			method: "GET",
+			match:  config.Match{Method: "GET|POST"},
+			want:   true,
+		},
+		{
+			name:   "method regex with anchors",
+			path:   "/v1.42/containers/json",
+			method: "GET",
+			match:  config.Match{Method: "^GET$"},
+			want:   true,
+		},
+		{
+			name:   "method regex no match",
+			path:   "/v1.42/containers/json",
+			method: "GET",
+			match:  config.Match{Method: "POST|PUT"},
+			want:   false,
+		},
+
+		// Combined path and method tests
+		{
+			name:   "both path and method match",
+			path:   "/v1.42/containers/json",
+			method: "GET",
+			match:  config.Match{Path: "/v1\\.[0-9]+/containers/.*", Method: "GET|HEAD"},
+			want:   true,
+		},
+		{
+			name:   "path matches but method doesn't",
+			path:   "/v1.42/containers/json",
+			method: "GET",
+			match:  config.Match{Path: "/v1\\.[0-9]+/containers/.*", Method: "POST"},
+			want:   false,
+		},
+		{
+			name:   "method matches but path doesn't",
+			path:   "/v1.42/containers/json",
+			method: "GET",
+			match:  config.Match{Path: "/v1\\.[0-9]+/networks/.*", Method: "GET"},
+			want:   false,
+		},
+
+		// Special regex patterns
+		{
+			name:   "dot matches any character",
+			path:   "/v1.42/containers/json",
+			method: "GET",
+			match:  config.Match{Path: "/v1.../containers/json"},
+			want:   true,
+		},
+		{
+			name:   "character class",
+			path:   "/v1.42/containers/json",
+			method: "GET",
+			match:  config.Match{Path: "/v1\\.[0-9][0-9]/containers/json"},
+			want:   true,
+		},
+		{
+			name:   "match everything",
+			path:   "/v1.42/containers/json",
+			method: "GET",
+			match:  config.Match{Path: ".*", Method: ".*"},
+			want:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a request with the specified path and method
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+
+			// Test the rule matching
+			got := handler.ruleMatches(req, tt.match)
+
+			if got != tt.want {
+				t.Errorf("ruleMatches() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

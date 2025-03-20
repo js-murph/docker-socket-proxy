@@ -39,27 +39,30 @@ func NewManagementHandler(dockerSocket string, configs map[string]*config.Socket
 	}
 }
 
+// ServeHTTP handles HTTP requests to the management server
 func (h *ManagementHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log := logging.GetLogger()
 
+	// Log the request
+	log.Info("Management request",
+		"method", r.Method,
+		"path", r.URL.Path,
+	)
+
+	// Handle the request based on the path
 	switch {
-	case r.Method == "POST" && r.URL.Path == "/create-socket":
-		h.handleCreateSocket(w, r)
-	case r.Method == "DELETE" && r.URL.Path == "/delete-socket":
-		h.handleDeleteSocket(w, r)
-	case r.Method == "GET" && r.URL.Path == "/list-sockets":
+	case r.Method == "POST" && (r.URL.Path == "/socket" || r.URL.Path == "/create-socket"):
+		h.CreateSocketHandler(w, r)
+	case r.Method == "GET" && (r.URL.Path == "/socket" || r.URL.Path == "/list-sockets"):
 		h.handleListSockets(w, r)
-	case r.Method == "GET" && r.URL.Path == "/describe-socket":
+	case r.Method == "GET" && (strings.HasPrefix(r.URL.Path, "/socket/") || r.URL.Path == "/describe-socket"):
 		h.handleDescribeSocket(w, r)
+	case r.Method == "DELETE" && (strings.HasPrefix(r.URL.Path, "/socket/") || r.URL.Path == "/delete-socket"):
+		h.handleDeleteSocket(w, r)
 	default:
 		log.Error("Unknown request", "method", r.Method, "path", r.URL.Path)
 		http.Error(w, "Not found", http.StatusNotFound)
 	}
-}
-
-// generateSocketPath creates a unique socket path in the system's temp directory
-func generateSocketPath(socketDir string) string {
-	return filepath.Join(socketDir, fmt.Sprintf("docker-proxy-%s.sock", uuid.New().String()))
 }
 
 // validateAndDecodeConfig validates and decodes the socket configuration from the request
@@ -90,8 +93,17 @@ func (h *ManagementHandler) validateAndDecodeConfig(r *http.Request) (*config.So
 	return socketConfig, nil
 }
 
-func (h *ManagementHandler) handleCreateSocket(w http.ResponseWriter, r *http.Request) {
+// CreateSocketHandler handles requests to create a new socket
+func (h *ManagementHandler) CreateSocketHandler(w http.ResponseWriter, r *http.Request) {
 	log := logging.GetLogger()
+
+	// Get the server from the context
+	srv, ok := r.Context().Value(serverContextKey).(*Server)
+	if !ok {
+		log.Error("Server not found in context")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
 
 	// Validate and decode the configuration
 	socketConfig, err := h.validateAndDecodeConfig(r)
@@ -101,78 +113,81 @@ func (h *ManagementHandler) handleCreateSocket(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Get the server from the context
-	s, ok := r.Context().Value(serverContextKey).(*Server)
-	if !ok {
-		log.Error("Server context not found")
-		http.Error(w, "Server context not found", http.StatusInternalServerError)
-		return
-	}
-
-	// Generate a new socket path
-	socketPath := generateSocketPath(s.socketDir)
-
-	// Create the socket and start the proxy server
-	if err := h.createSocket(socketPath, socketConfig, s); err != nil {
-		log.Error("Failed to create socket", "error", err)
-		http.Error(w, fmt.Sprintf("Failed to create socket: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	w.Write([]byte(socketPath))
-}
-
-// createSocket handles the actual creation of a socket and its resources
-func (h *ManagementHandler) createSocket(socketPath string, socketConfig *config.SocketConfig, s *Server) error {
-	log := logging.GetLogger()
-
-	// Remove any existing socket at this path
-	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to remove existing socket: %w", err)
-	}
-
-	// Save config before creating socket
-	if err := h.store.SaveConfig(socketPath, socketConfig); err != nil {
-		return fmt.Errorf("failed to save config: %w", err)
-	}
+	// Generate a unique socket path
+	socketName := fmt.Sprintf("docker-proxy-%s.sock", uuid.New().String())
+	socketPath := filepath.Join(srv.socketDir, socketName)
 
 	// Create the socket listener
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
-		// Cleanup config if socket creation fails
-		h.store.DeleteConfig(socketPath)
-		return fmt.Errorf("failed to create socket listener: %w", err)
+		log.Error("Failed to create socket", "error", err, "path", socketPath)
+		http.Error(w, fmt.Sprintf("Failed to create socket: %v", err), http.StatusInternalServerError)
+		return
 	}
 
-	// Add the config to our map
+	// Set socket permissions
+	if err := os.Chmod(socketPath, 0660); err != nil {
+		log.Warn("Failed to set socket permissions", "error", err)
+	}
+
+	// Add the socket to the server's tracking
+	srv.TrackSocket(socketPath)
+
+	// Add the configuration to the map
 	h.configMu.Lock()
 	h.socketConfigs[socketPath] = socketConfig
 	h.configMu.Unlock()
 
-	// Create and start the proxy server
+	// Save the configuration to disk
+	if err := h.store.SaveConfig(socketPath, socketConfig); err != nil {
+		log.Error("Failed to save socket configuration", "error", err)
+		// Continue anyway - the socket will still work
+	}
+
+	// Create a proxy handler for the socket
+	proxyHandler := NewProxyHandler(h.dockerSocket, h.socketConfigs, h.configMu)
+
+	// Create a server for the socket
 	server := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			h.proxyHandler.ServeHTTP(w, r)
+			// Apply rewrite rules if needed
+			if srv != nil {
+				if err := srv.applyRewriteRules(socketPath, r); err != nil {
+					log.Error("Failed to apply rewrite rules", "error", err)
+				}
+			}
+
+			// Serve the request
+			proxyHandler.ServeHTTPWithSocket(w, r, socketPath)
 		}),
 	}
 
-	// Track the server
-	h.serverMu.Lock()
-	h.servers[socketPath] = server
-	h.serverMu.Unlock()
+	// Add the server to the map
+	srv.proxyMu.Lock()
+	srv.proxyServers[socketPath] = server
+	srv.proxyMu.Unlock()
 
-	// Track the created socket
-	s.TrackSocket(socketPath)
-
-	// Start serving in a goroutine
+	// Start the server in a goroutine
 	go func() {
-		if err := server.Serve(listener); err != http.ErrServerClosed {
-			log.Error("Proxy server error", "error", err, "socket", socketPath)
+		log.Info("Created new proxy socket", "path", socketPath)
+		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+			log.Error("Proxy server error", "error", err, "path", socketPath)
 		}
 	}()
 
-	log.Info("Created new proxy socket", "path", socketPath)
-	return nil
+	// Return the socket path
+	w.Header().Set("Content-Type", "application/json")
+	response := struct {
+		SocketPath string `json:"socket_path"`
+	}{
+		SocketPath: socketPath,
+	}
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Error("Failed to encode response", "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
 }
 
 func (h *ManagementHandler) handleDeleteSocket(w http.ResponseWriter, r *http.Request) {
@@ -316,7 +331,6 @@ func (h *ManagementHandler) handleDescribeSocket(w http.ResponseWriter, r *http.
 		if err != nil {
 			log.Error("Failed to load config", "error", err)
 			http.Error(w, fmt.Sprintf("socket %s not found or has no configuration", socketName), http.StatusNotFound)
-			return
 		}
 	}
 
