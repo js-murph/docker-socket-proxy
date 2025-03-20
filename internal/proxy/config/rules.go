@@ -26,12 +26,17 @@ type RuleSet struct {
 }
 
 type RewriteRule struct {
-	Match    Match     `yaml:"match"`
-	Patterns []Pattern `yaml:"patterns"`
+	Match   Match           `yaml:"match"`
+	Actions []RewriteAction `yaml:"actions"`
+}
+
+type RewriteAction struct {
+	Action   string                 `yaml:"action"`
+	Contains map[string]interface{} `yaml:"contains,omitempty"`
+	Update   map[string]interface{} `yaml:"update,omitempty"`
 }
 
 type Pattern struct {
-	Field  string      `yaml:"field"`           // Supports dot notation for nested fields
 	Match  interface{} `yaml:"match,omitempty"` // Optional match value for updates
 	Value  interface{} `yaml:"value,omitempty"` // The value to set/update
 	Action string      `yaml:"action"`          // "replace" (default), "upsert", or "delete"
@@ -103,26 +108,43 @@ func validateRewriteRule(i int, rule RewriteRule) error {
 	}
 
 	// Validate patterns
-	if len(rule.Patterns) == 0 {
+	if len(rule.Actions) == 0 {
 		return fmt.Errorf("rewrite rule %d: at least one pattern must be specified", i)
 	}
 
-	for j, pattern := range rule.Patterns {
-		if pattern.Field == "" {
-			return fmt.Errorf("rewrite rule %d, pattern %d: field must be specified", i, j)
+	for j, pattern := range rule.Actions {
+		if err := validateRewriteAction(i, j, pattern); err != nil {
+			return err
 		}
+	}
 
-		if pattern.Action != "replace" && pattern.Action != "upsert" && pattern.Action != "delete" {
-			return fmt.Errorf("rewrite rule %d, pattern %d: action must be 'replace', 'upsert', or 'delete', got '%s'", i, j, pattern.Action)
-		}
+	return nil
+}
 
-		if pattern.Action == "replace" && pattern.Match == nil {
-			return fmt.Errorf("rewrite rule %d, pattern %d: replace action requires a match value", i, j)
-		}
+// validateRewriteAction validates a rewrite action
+func validateRewriteAction(ruleIndex, actionIndex int, action RewriteAction) error {
+	// Validate action type
+	if action.Action != "replace" && action.Action != "upsert" && action.Action != "delete" {
+		return fmt.Errorf("invalid action for rewrite rule %d, action %d: %s (must be 'replace', 'upsert', or 'delete')",
+			ruleIndex, actionIndex, action.Action)
+	}
 
-		if pattern.Action != "delete" && pattern.Value == nil {
-			return fmt.Errorf("rewrite rule %d, pattern %d: %s action requires a value", i, j, pattern.Action)
-		}
+	// For delete, match must be specified
+	if action.Action == "delete" && len(action.Contains) == 0 {
+		return fmt.Errorf("rewrite rule %d, action %d: delete action must specify match criteria",
+			ruleIndex, actionIndex)
+	}
+
+	// For replace, both match and update must be specified
+	if action.Action == "replace" && (len(action.Contains) == 0 || len(action.Update) == 0) {
+		return fmt.Errorf("rewrite rule %d, action %d: replace action must specify both match and update",
+			ruleIndex, actionIndex)
+	}
+
+	// For upsert, update must be specified
+	if action.Action == "upsert" && len(action.Update) == 0 {
+		return fmt.Errorf("rewrite rule %d, action %d: upsert action must specify update",
+			ruleIndex, actionIndex)
 	}
 
 	return nil
@@ -211,11 +233,16 @@ func (c *SocketConfig) GetPropagationRules() []RewriteRule {
 				Path:   "/v1.*/containers/create",
 				Method: "POST",
 			},
-			Patterns: []Pattern{
+			Actions: []RewriteAction{
 				{
-					Field:  "HostConfig.Binds",
 					Action: "upsert",
-					Value:  []interface{}{fmt.Sprintf("%s:%s:ro", c.Config.PropagateSocket, c.Config.PropagateSocket)},
+					Update: map[string]interface{}{
+						"HostConfig": map[string]interface{}{
+							"Binds": []interface{}{
+								fmt.Sprintf("%s:%s:ro", c.Config.PropagateSocket, c.Config.PropagateSocket),
+							},
+						},
+					},
 				},
 			},
 		},

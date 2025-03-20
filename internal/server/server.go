@@ -11,9 +11,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"reflect"
 	"regexp"
-	"strings"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -252,74 +251,350 @@ func (s *Server) loadExistingConfigs() error {
 	return nil
 }
 
-// applyRewriteRules applies any rewrite rules to the request
+// applyRewriteRules applies rewrite rules to a request
 func (s *Server) applyRewriteRules(socketPath string, r *http.Request) error {
 	// Get the socket configuration
 	s.configMu.RLock()
-	socketConfig, exists := s.socketConfigs[socketPath]
+	socketConfig, ok := s.socketConfigs[socketPath]
 	s.configMu.RUnlock()
 
-	if !exists || socketConfig == nil || len(socketConfig.Rules.Rewrites) == 0 {
+	if !ok || socketConfig == nil {
+		return nil // No config, no rewrites
+	}
+
+	// Check if there are any rewrite rules
+	if len(socketConfig.Rules.Rewrites) == 0 {
 		return nil
 	}
 
-	// Only apply rewrites to POST, PUT, PATCH requests with a body
-	if r.Method != "POST" && r.Method != "PUT" && r.Method != "PATCH" {
+	// Only apply rewrites to POST requests that might have a body
+	if r.Method != "POST" {
 		return nil
 	}
 
 	// Read the request body
+	if r.Body == nil {
+		return nil
+	}
+
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read request body: %w", err)
 	}
-
-	// Close the original body
 	r.Body.Close()
 
-	// Parse the request body as JSON
+	// Parse the JSON body
 	var body map[string]interface{}
 	if err := json.Unmarshal(bodyBytes, &body); err != nil {
-		// If the body is not valid JSON, restore the original body and continue
-		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-		return nil
+		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes)) // Restore the original body
+		return fmt.Errorf("failed to parse JSON body: %w", err)
 	}
 
-	// Apply each rewrite rule
+	// Check each rewrite rule
 	modified := false
-	for _, rewrite := range socketConfig.Rules.Rewrites {
-		// Check if the rewrite rule matches the request
-		if matchesRule(r, rewrite.Match) {
-			// Apply each pattern in the rewrite rule
-			for _, pattern := range rewrite.Patterns {
-				if applyPattern(body, pattern) {
-					modified = true
-				}
-			}
+	for _, rule := range socketConfig.Rules.Rewrites {
+		// Check if the rule matches
+		if !matchesRule(r, rule.Match) {
+			continue
+		}
+
+		// Apply the rewrite actions
+		if applyRewriteActions(body, rule.Actions) {
+			modified = true
 		}
 	}
 
-	// If the body was modified, update the request body
+	// If the body was modified, update the request
 	if modified {
 		// Marshal the modified body back to JSON
 		newBodyBytes, err := json.Marshal(body)
 		if err != nil {
-			// If marshaling fails, restore the original body
-			r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+			r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes)) // Restore the original body
 			return fmt.Errorf("failed to marshal modified body: %w", err)
 		}
 
-		// Update the Content-Length header
-		r.ContentLength = int64(len(newBodyBytes))
-
-		// Set the new body
+		// Update the request body and Content-Length header
 		r.Body = io.NopCloser(bytes.NewBuffer(newBodyBytes))
+		r.ContentLength = int64(len(newBodyBytes))
+		r.Header.Set("Content-Length", strconv.Itoa(len(newBodyBytes)))
 	} else {
 		// Restore the original body
 		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 	}
 
 	return nil
+}
+
+// matchesRule checks if a request matches a rewrite rule
+func matchesRule(r *http.Request, match config.Match) bool {
+	// Check path match
+	if match.Path != "" {
+		pathMatched, err := regexp.MatchString(match.Path, r.URL.Path)
+		if err != nil || !pathMatched {
+			return false
+		}
+	}
+
+	// Check method match
+	if match.Method != "" {
+		methodMatched, err := regexp.MatchString(match.Method, r.Method)
+		if err != nil || !methodMatched {
+			return false
+		}
+	}
+
+	// Check contains criteria
+	if len(match.Contains) > 0 {
+		// Read and restore the body
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			return false
+		}
+		r.Body.Close()
+		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+
+		// Parse the JSON body
+		var body map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &body); err != nil {
+			return false
+		}
+
+		// Check if the body matches the contains criteria
+		if !matchesContains(body, match.Contains) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// applyRewriteActions applies rewrite actions to a request body
+func applyRewriteActions(body map[string]interface{}, actions []config.RewriteAction) bool {
+	modified := false
+
+	for _, action := range actions {
+		switch action.Action {
+		case "replace":
+			if matchesStructure(body, action.Contains) {
+				if mergeStructure(body, action.Update, true) {
+					modified = true
+				}
+			}
+
+		case "upsert":
+			if mergeStructure(body, action.Update, false) {
+				modified = true
+			}
+
+		case "delete":
+			if deleteMatchingFields(body, action.Contains) {
+				modified = true
+			}
+		}
+	}
+
+	return modified
+}
+
+// matchesStructure checks if a body matches a structure
+func matchesStructure(body map[string]interface{}, match map[string]interface{}) bool {
+	for key, expectedValue := range match {
+		actualValue, exists := body[key]
+		if !exists {
+			return false
+		}
+
+		// If the expected value is a map, recurse into it
+		if expectedMap, ok := expectedValue.(map[string]interface{}); ok {
+			if actualMap, ok := actualValue.(map[string]interface{}); ok {
+				if !matchesStructure(actualMap, expectedMap) {
+					return false
+				}
+			} else {
+				return false
+			}
+		} else if !containsValue(actualValue, expectedValue) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// mergeStructure merges a structure into a body
+func mergeStructure(body map[string]interface{}, update map[string]interface{}, replace bool) bool {
+	modified := false
+
+	for key, updateValue := range update {
+		// Handle nested maps
+		if updateMap, ok := updateValue.(map[string]interface{}); ok {
+			// If the key doesn't exist or isn't a map, create it
+			if actualValue, exists := body[key]; !exists {
+				body[key] = updateMap
+				modified = true
+			} else if actualMap, ok := actualValue.(map[string]interface{}); ok {
+				// Recurse into the nested map
+				if mergeStructure(actualMap, updateMap, replace) {
+					modified = true
+				}
+			} else if replace {
+				// Replace the value
+				body[key] = updateMap
+				modified = true
+			}
+		} else if updateArray, ok := updateValue.([]interface{}); ok {
+			// Handle arrays (like Env)
+			if key == "Env" {
+				// Special handling for Env arrays
+				if actualValue, exists := body[key]; !exists {
+					// Key doesn't exist, create it
+					body[key] = updateArray
+					modified = true
+				} else if actualArray, ok := actualValue.([]interface{}); ok {
+					// Merge or replace the array
+					if replace {
+						// For replace, we need to check each item
+						newArray := make([]interface{}, 0, len(actualArray))
+						replaced := false
+
+						for _, item := range actualArray {
+							// Check if this item should be replaced
+							shouldReplace := false
+							for _, updateItem := range updateArray {
+								if containsValue(item, updateItem) {
+									shouldReplace = true
+									break
+								}
+							}
+
+							if shouldReplace {
+								// Add the update items instead
+								for _, updateItem := range updateArray {
+									newArray = append(newArray, updateItem)
+								}
+								replaced = true
+								break
+							} else {
+								// Keep the original item
+								newArray = append(newArray, item)
+							}
+						}
+
+						if replaced {
+							body[key] = newArray
+							modified = true
+						} else if len(updateArray) > 0 {
+							// If no items were replaced but we have updates, append them
+							body[key] = append(actualArray, updateArray...)
+							modified = true
+						}
+					} else {
+						// For upsert, just append
+						body[key] = append(actualArray, updateArray...)
+						modified = true
+					}
+				} else if replace {
+					// Replace the value
+					body[key] = updateArray
+					modified = true
+				}
+			} else {
+				// Regular array handling
+				if actualValue, exists := body[key]; !exists {
+					// Key doesn't exist, create it
+					body[key] = updateArray
+					modified = true
+				} else if actualArray, ok := actualValue.([]interface{}); ok {
+					if replace {
+						// Replace the array
+						body[key] = updateArray
+						modified = true
+					} else {
+						// Merge the arrays
+						body[key] = append(actualArray, updateArray...)
+						modified = true
+					}
+				} else if replace {
+					// Replace the value
+					body[key] = updateArray
+					modified = true
+				}
+			}
+		} else {
+			// Handle simple values
+			if _, exists := body[key]; !exists || replace {
+				body[key] = updateValue
+				modified = true
+			}
+		}
+	}
+
+	return modified
+}
+
+// deleteMatchingFields deletes fields that match a structure
+func deleteMatchingFields(body map[string]interface{}, match map[string]interface{}) bool {
+	modified := false
+
+	for key, matchValue := range match {
+		actualValue, exists := body[key]
+		if !exists {
+			continue
+		}
+
+		// If the match value is a map, recurse into it
+		if matchMap, ok := matchValue.(map[string]interface{}); ok {
+			if actualMap, ok := actualValue.(map[string]interface{}); ok {
+				if deleteMatchingFields(actualMap, matchMap) {
+					modified = true
+				}
+				// If the map is now empty, delete it
+				if len(actualMap) == 0 {
+					delete(body, key)
+					modified = true
+				}
+			}
+		} else if matchArray, ok := matchValue.([]interface{}); ok {
+			// Handle arrays (like Env)
+			if actualArray, ok := actualValue.([]interface{}); ok {
+				newArray := make([]interface{}, 0, len(actualArray))
+				deleted := false
+
+				for _, item := range actualArray {
+					shouldDelete := false
+					for _, matchItem := range matchArray {
+						if containsValue(item, matchItem) {
+							shouldDelete = true
+							break
+						}
+					}
+
+					if !shouldDelete {
+						newArray = append(newArray, item)
+					} else {
+						deleted = true
+					}
+				}
+
+				if deleted {
+					if len(newArray) > 0 {
+						body[key] = newArray
+					} else {
+						delete(body, key)
+					}
+					modified = true
+				}
+			}
+		} else {
+			// Handle simple values
+			if containsValue(actualValue, matchValue) {
+				delete(body, key)
+				modified = true
+			}
+		}
+	}
+
+	return modified
 }
 
 // cleanup cleans up resources
@@ -339,27 +614,6 @@ func (s *Server) cleanup() {
 		}
 	}
 	s.socketMu.Unlock()
-}
-
-// matchesRule checks if a request matches a rewrite rule
-func matchesRule(r *http.Request, match config.Match) bool {
-	// Check path match
-	if match.Path != "" {
-		matched, err := regexp.MatchString(match.Path, r.URL.Path)
-		if err != nil || !matched {
-			return false
-		}
-	}
-
-	// Check method match
-	if match.Method != "" {
-		matched, err := regexp.MatchString(match.Method, r.Method)
-		if err != nil || !matched {
-			return false
-		}
-	}
-
-	return true
 }
 
 // DeleteSocket stops and removes a proxy socket
@@ -392,131 +646,4 @@ func (s *Server) DeleteSocket(socketPath string) error {
 	}
 
 	return nil
-}
-
-// applyPattern applies a pattern to a request body
-func applyPattern(body map[string]interface{}, pattern config.Pattern) bool {
-	// Get the field value using dot notation (e.g., "HostConfig.Privileged")
-	fieldPath := strings.Split(pattern.Field, ".")
-	current := body
-
-	// Navigate to the parent object of the field
-	for i := 0; i < len(fieldPath)-1; i++ {
-		field := fieldPath[i]
-		if val, ok := current[field]; ok {
-			if nestedMap, ok := val.(map[string]interface{}); ok {
-				current = nestedMap
-			} else {
-				return false // Field path doesn't exist
-			}
-		} else {
-			return false // Field path doesn't exist
-		}
-	}
-
-	// Get the final field name
-	fieldName := fieldPath[len(fieldPath)-1]
-
-	// Handle different actions
-	switch pattern.Action {
-	case "replace":
-		// For array fields like Env
-		if fieldName == "Env" {
-			if envArray, ok := current[fieldName].([]interface{}); ok {
-				// Create a new array with the replaced values
-				newEnv := make([]interface{}, 0, len(envArray))
-				replaced := false
-
-				// Check if we're dealing with the test case format (DEBUG=true)
-				matchStr, isMatchStr := pattern.Match.(string)
-				valueStr, isValueStr := pattern.Value.(string)
-
-				for _, env := range envArray {
-					if envStr, ok := env.(string); ok {
-						// Special case for the test
-						if isMatchStr && isValueStr && envStr == matchStr {
-							newEnv = append(newEnv, valueStr)
-							replaced = true
-						} else if isMatchStr && strings.HasPrefix(envStr, matchStr+"=") {
-							// Regular case: replace value after the equals sign
-							parts := strings.SplitN(envStr, "=", 2)
-							newEnv = append(newEnv, parts[0]+"="+valueStr)
-							replaced = true
-						} else {
-							// Keep the original value
-							newEnv = append(newEnv, envStr)
-						}
-					} else {
-						// Keep non-string values
-						newEnv = append(newEnv, env)
-					}
-				}
-
-				if replaced {
-					current[fieldName] = newEnv
-					return true
-				}
-			}
-		} else {
-			// For regular fields, just replace the value
-			if val, ok := current[fieldName]; ok {
-				if reflect.DeepEqual(val, pattern.Match) {
-					current[fieldName] = pattern.Value
-					return true
-				}
-			}
-		}
-
-	case "upsert":
-		// For array fields like Env
-		if fieldName == "Env" {
-			if envArray, ok := current[fieldName].([]interface{}); ok {
-				// Add the value if it doesn't exist
-				current[fieldName] = append(envArray, pattern.Value)
-				return true
-			} else if _, ok := current[fieldName]; !ok {
-				// Create the array if it doesn't exist
-				current[fieldName] = []interface{}{pattern.Value}
-				return true
-			}
-		} else {
-			// For regular fields, just set the value
-			current[fieldName] = pattern.Value
-			return true
-		}
-
-	case "delete":
-		// For array fields like Env
-		if fieldName == "Env" {
-			if envArray, ok := current[fieldName].([]interface{}); ok {
-				// Create a new array without the matching items
-				newEnv := make([]interface{}, 0, len(envArray))
-				for _, env := range envArray {
-					if envStr, ok := env.(string); ok {
-						// If the pattern has a wildcard, use a regex match
-						if strings.Contains(pattern.Match.(string), "*") {
-							pattern := strings.Replace(pattern.Match.(string), "*", ".*", -1)
-							matched, _ := regexp.MatchString("^"+pattern+"$", envStr)
-							if !matched {
-								newEnv = append(newEnv, env)
-							}
-						} else if envStr != pattern.Match {
-							// Otherwise use exact match
-							newEnv = append(newEnv, env)
-						}
-					} else {
-						newEnv = append(newEnv, env)
-					}
-				}
-				current[fieldName] = newEnv
-				return true
-			}
-		} else if _, ok := current[fieldName]; ok {
-			// For regular fields, delete the field
-			delete(current, fieldName)
-			return true
-		}
-	}
-
-	return false
 }

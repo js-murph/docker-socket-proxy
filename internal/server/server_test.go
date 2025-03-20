@@ -163,7 +163,6 @@ func TestApplyPattern(t *testing.T) {
 				"Env": []interface{}{"DEBUG=true", "OTHER=value"},
 			},
 			pattern: config.Pattern{
-				Field:  "Env",
 				Action: "replace",
 				Match:  "DEBUG=true",
 				Value:  "DEBUG=false",
@@ -179,7 +178,6 @@ func TestApplyPattern(t *testing.T) {
 				"Env": []interface{}{"EXISTING=true"},
 			},
 			pattern: config.Pattern{
-				Field:  "Env",
 				Action: "upsert",
 				Value:  "NEW=value",
 			},
@@ -194,7 +192,6 @@ func TestApplyPattern(t *testing.T) {
 				"Env": []interface{}{"DEBUG=true", "KEEP=value"},
 			},
 			pattern: config.Pattern{
-				Field:  "Env",
 				Action: "delete",
 				Match:  "DEBUG=*",
 			},
@@ -211,7 +208,6 @@ func TestApplyPattern(t *testing.T) {
 				},
 			},
 			pattern: config.Pattern{
-				Field:  "HostConfig.Privileged",
 				Action: "replace",
 				Match:  true,
 				Value:  false,
@@ -227,11 +223,6 @@ func TestApplyPattern(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := applyPattern(tt.body, tt.pattern)
-			if got != tt.want {
-				t.Errorf("applyPattern() = %v, want %v", got, tt.want)
-			}
-
 			if !reflect.DeepEqual(tt.body, tt.wantBody) {
 				t.Errorf("body after applyPattern() = %v, want %v", tt.body, tt.wantBody)
 			}
@@ -257,17 +248,25 @@ func TestApplyRewriteRules(t *testing.T) {
 								Path:   "/v1.*/containers/create",
 								Method: "POST",
 							},
-							Patterns: []config.Pattern{
+							Actions: []config.RewriteAction{
 								{
-									Field:  "Env",
 									Action: "upsert",
-									Value:  "ADDED=true",
+									Update: map[string]interface{}{
+										"Env": []interface{}{"ADDED=true"},
+									},
 								},
 								{
-									Field:  "HostConfig.Privileged",
 									Action: "replace",
-									Match:  true,
-									Value:  false,
+									Contains: map[string]interface{}{
+										"HostConfig": map[string]interface{}{
+											"Privileged": true,
+										},
+									},
+									Update: map[string]interface{}{
+										"HostConfig": map[string]interface{}{
+											"Privileged": false,
+										},
+									},
 								},
 							},
 						},

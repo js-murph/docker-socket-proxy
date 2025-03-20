@@ -33,7 +33,7 @@ rules:
     - match:
         path: "/v1.*/containers/create"
         method: "POST"
-      patterns:
+      actions:
         - action: "upsert"
           update:
             Env:
@@ -55,4 +55,4 @@ rules:
         - action: "delete"
           contains:
             Env:
-              - "PANTS=*"
+              - "PANTS=FOO"

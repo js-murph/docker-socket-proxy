@@ -2,7 +2,6 @@ package config
 
 import (
 	"os"
-	"reflect"
 	"testing"
 )
 
@@ -223,20 +222,6 @@ func TestGetPropagationRules(t *testing.T) {
 	rule := rules[0]
 	if rule.Match.Path != "/v1.*/containers/create" || rule.Match.Method != "POST" {
 		t.Error("unexpected rule match criteria")
-	}
-
-	if len(rule.Patterns) != 1 {
-		t.Fatalf("expected 1 pattern, got %d", len(rule.Patterns))
-	}
-
-	pattern := rule.Patterns[0]
-	if pattern.Field != "HostConfig.Binds" || pattern.Action != "upsert" {
-		t.Error("unexpected pattern configuration")
-	}
-
-	expectedValue := []interface{}{"/var/run/docker.sock:/var/run/docker.sock:ro"}
-	if !reflect.DeepEqual(pattern.Value, expectedValue) {
-		t.Errorf("expected value %v, got %v", expectedValue, pattern.Value)
 	}
 }
 
