@@ -34,17 +34,25 @@ rules:
         path: "/v1.*/containers/create"
         method: "POST"
       patterns:
-        - field: "Env"
-          action: "upsert"
-          value: "FUN=yes"
-        - field: "Env"
-          action: "replace"
-          match: "DEBUG=true"
-          value: "DEBUG=false"
-        - field: "HostConfig.Privileged"
-          action: "replace"
-          match: true
-          value: false
-        - field: "Env"
-          action: "delete"
-          match: "PANTS=*"
+        - action: "upsert"
+          update:
+            Env:
+              - "FUN=yes"
+        - action: "replace"
+          contains:
+            Env:
+              - "DEBUG=true"
+          update:
+            Env:
+              - "DEBUG=false"
+        - action: "replace"
+          contains:
+            HostConfig:
+              Privileged: true
+          update:
+            HostConfig:
+              Privileged: false
+        - action: "delete"
+          contains:
+            Env:
+              - "PANTS=*"

@@ -212,91 +212,92 @@ func (h *ProxyHandler) ruleMatches(r *http.Request, match config.Match) bool {
 			return false
 		}
 
-		// Check each contains criteria
-		for field, expectedValue := range match.Contains {
-			// Get the actual value from the body
-			actualValue, exists := getNestedValue(body, field)
-			if !exists {
-				log.Info("Field not found in request body", "field", field)
-				return false
-			}
-
-			// Check if the actual value contains the expected value
-			if !containsValue(actualValue, expectedValue) {
-				log.Info("Field value does not contain expected value",
-					"field", field,
-					"actual", actualValue,
-					"expected", expectedValue)
-				return false
-			}
-			log.Info("Contains check passed",
-				"field", field,
-				"actual", actualValue,
-				"expected", expectedValue)
+		// Check if the request body matches the contains criteria
+		if !matchesContains(body, match.Contains) {
+			log.Info("Request body does not match contains criteria")
+			return false
 		}
+		log.Info("Contains check passed")
 	}
 
 	return true
 }
 
-// getNestedValue gets a nested value from a map using dot notation
-func getNestedValue(data map[string]interface{}, path string) (interface{}, bool) {
+// matchesContains checks if the request body matches the contains criteria
+func matchesContains(body map[string]interface{}, contains map[string]interface{}) bool {
 	log := logging.GetLogger()
-	parts := strings.Split(path, ".")
-	current := data
 
-	log.Debug("Getting nested value", "path", path, "data_keys", getMapKeys(current))
-
-	// Navigate through the nested structure
-	for i, part := range parts {
-		if i == len(parts)-1 {
-			// Last part, return the value
-			val, exists := current[part]
-			if exists {
-				log.Debug("Found value", "path", path, "value", val)
-			} else {
-				log.Debug("Value not found", "path", path, "current_keys", getMapKeys(current))
-			}
-			return val, exists
-		}
-
-		// Not the last part, navigate deeper
-		next, exists := current[part]
+	for key, expectedValue := range contains {
+		actualValue, exists := body[key]
 		if !exists {
-			log.Debug("Path segment not found", "segment", part, "current_keys", getMapKeys(current))
-			return nil, false
+			log.Info("Field not found in request body", "field", key)
+			return false
 		}
 
-		// Check if the next level is a map
-		nextMap, ok := next.(map[string]interface{})
-		if !ok {
-			// Try to convert from json.RawMessage or other types
-			log.Debug("Not a map, trying to convert", "type", reflect.TypeOf(next))
-
-			// If it's a slice of interfaces, check if it contains maps
-			if sliceVal, isSlice := next.([]interface{}); isSlice {
-				// For Docker API, Env is often a slice of strings
-				if part == "Env" {
-					return sliceVal, true
+		// If the expected value is a map, recurse into it
+		if expectedMap, ok := expectedValue.(map[string]interface{}); ok {
+			if actualMap, ok := actualValue.(map[string]interface{}); ok {
+				if !matchesContains(actualMap, expectedMap) {
+					log.Info("Nested field does not match", "field", key)
+					return false
 				}
+			} else {
+				log.Info("Field is not a map", "field", key, "type", reflect.TypeOf(actualValue))
+				return false
 			}
-
-			return nil, false
+		} else if expectedArray, ok := expectedValue.([]interface{}); ok {
+			// Handle array matching
+			if actualArray, ok := actualValue.([]interface{}); ok {
+				// Check if all items in expected are in actual
+				for _, expectedItem := range expectedArray {
+					found := false
+					for _, actualItem := range actualArray {
+						if containsValue(actualItem, expectedItem) {
+							found = true
+							break
+						}
+					}
+					if !found {
+						log.Info("Array does not contain expected item",
+							"field", key,
+							"expected_item", expectedItem)
+						return false
+					}
+				}
+			} else if expectedStr, ok := expectedValue.(string); ok {
+				// Special case for string matching in arrays
+				found := false
+				for _, actualItem := range actualArray {
+					if itemStr, ok := actualItem.(string); ok && strings.Contains(itemStr, expectedStr) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					log.Info("Array does not contain string",
+						"field", key,
+						"expected", expectedStr)
+					return false
+				}
+			} else {
+				log.Info("Field is not an array", "field", key, "type", reflect.TypeOf(actualValue))
+				return false
+			}
+		} else {
+			// For simple values, use containsValue
+			if !containsValue(actualValue, expectedValue) {
+				log.Info("Field value does not match expected value",
+					"field", key,
+					"actual", actualValue,
+					"expected", expectedValue)
+				return false
+			}
 		}
 
-		current = nextMap
+		log.Info("Field matches expected value", "field", key)
 	}
 
-	return nil, false
-}
-
-// Helper function to get map keys for debugging
-func getMapKeys(m map[string]interface{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
+	return true
 }
 
 // containsValue checks if a value contains another value

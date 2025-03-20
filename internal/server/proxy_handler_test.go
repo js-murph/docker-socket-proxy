@@ -442,3 +442,261 @@ func TestRegexMatching(t *testing.T) {
 		})
 	}
 }
+
+func TestContainsMatching(t *testing.T) {
+	tests := []struct {
+		name          string
+		requestBody   string
+		matchContains map[string]interface{}
+		wantMatch     bool
+	}{
+		{
+			name: "match simple env variable",
+			requestBody: `{
+				"Image": "nginx",
+				"Env": ["DEBUG=true", "APP=test"]
+			}`,
+			matchContains: map[string]interface{}{
+				"Env": "DEBUG=true",
+			},
+			wantMatch: true,
+		},
+		{
+			name: "match env variable with array in config",
+			requestBody: `{
+				"Image": "nginx",
+				"Env": ["DEBUG=true", "APP=test"]
+			}`,
+			matchContains: map[string]interface{}{
+				"Env": []interface{}{"DEBUG=true"},
+			},
+			wantMatch: true,
+		},
+		{
+			name: "match multiple env variables",
+			requestBody: `{
+				"Image": "nginx",
+				"Env": ["DEBUG=true", "APP=test", "BLOCK=true"]
+			}`,
+			matchContains: map[string]interface{}{
+				"Env": []interface{}{"DEBUG=true", "BLOCK=true"},
+			},
+			wantMatch: true,
+		},
+		{
+			name: "no match when env variable not present",
+			requestBody: `{
+				"Image": "nginx",
+				"Env": ["DEBUG=true", "APP=test"]
+			}`,
+			matchContains: map[string]interface{}{
+				"Env": "BLOCK=true",
+			},
+			wantMatch: false,
+		},
+		{
+			name: "match nested field",
+			requestBody: `{
+				"Image": "nginx",
+				"HostConfig": {
+					"Privileged": true,
+					"Binds": ["/tmp:/tmp"]
+				}
+			}`,
+			matchContains: map[string]interface{}{
+				"HostConfig": map[string]interface{}{
+					"Privileged": true,
+				},
+			},
+			wantMatch: true,
+		},
+		{
+			name: "no match when nested field has different value",
+			requestBody: `{
+				"Image": "nginx",
+				"HostConfig": {
+					"Privileged": false,
+					"Binds": ["/tmp:/tmp"]
+				}
+			}`,
+			matchContains: map[string]interface{}{
+				"HostConfig": map[string]interface{}{
+					"Privileged": true,
+				},
+			},
+			wantMatch: false,
+		},
+		{
+			name: "match array element in nested field",
+			requestBody: `{
+				"Image": "nginx",
+				"HostConfig": {
+					"Binds": ["/tmp:/tmp", "/var:/var"]
+				}
+			}`,
+			matchContains: map[string]interface{}{
+				"HostConfig": map[string]interface{}{
+					"Binds": "/var:/var",
+				},
+			},
+			wantMatch: true,
+		},
+		{
+			name: "match partial string in env variable",
+			requestBody: `{
+				"Image": "nginx",
+				"Env": ["DEBUG_LEVEL=verbose", "APP=test"]
+			}`,
+			matchContains: map[string]interface{}{
+				"Env": "DEBUG",
+			},
+			wantMatch: true,
+		},
+		{
+			name: "match when field exists but is empty",
+			requestBody: `{
+				"Image": "nginx",
+				"Env": []
+			}`,
+			matchContains: map[string]interface{}{
+				"Env": []interface{}{},
+			},
+			wantMatch: true,
+		},
+		{
+			name: "complex nested structure",
+			requestBody: `{
+				"Image": "nginx",
+				"Labels": {
+					"com.example.vendor": "ACME",
+					"com.example.version": "1.0"
+				},
+				"HostConfig": {
+					"Devices": [
+						{
+							"PathOnHost": "/dev/deviceName",
+							"PathInContainer": "/dev/deviceName",
+							"CgroupPermissions": "rwm"
+						}
+					]
+				}
+			}`,
+			matchContains: map[string]interface{}{
+				"Labels": map[string]interface{}{
+					"com.example.vendor": "ACME",
+				},
+			},
+			wantMatch: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a request with the test body
+			req := httptest.NewRequest("POST", "/v1.42/containers/create", strings.NewReader(tt.requestBody))
+
+			// Create a match object with the test contains criteria
+			match := config.Match{
+				Path:     "/v1.42/containers/create",
+				Method:   "POST",
+				Contains: tt.matchContains,
+			}
+
+			// Create a handler to test
+			handler := NewProxyHandler("/tmp/docker.sock", nil, &sync.RWMutex{})
+
+			// Test the rule matching
+			result := handler.ruleMatches(req, match)
+
+			if result != tt.wantMatch {
+				t.Errorf("ruleMatches() = %v, want %v", result, tt.wantMatch)
+			}
+		})
+	}
+}
+
+func TestContainsValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		actual   interface{}
+		expected interface{}
+		want     bool
+	}{
+		{
+			name:     "string contains substring",
+			actual:   "DEBUG=true",
+			expected: "DEBUG",
+			want:     true,
+		},
+		{
+			name:     "string equals string",
+			actual:   "DEBUG=true",
+			expected: "DEBUG=true",
+			want:     true,
+		},
+		{
+			name:     "string does not contain substring",
+			actual:   "APP=test",
+			expected: "DEBUG",
+			want:     false,
+		},
+		{
+			name:     "array contains string",
+			actual:   []interface{}{"DEBUG=true", "APP=test"},
+			expected: "DEBUG=true",
+			want:     true,
+		},
+		{
+			name:     "array contains all strings in expected array",
+			actual:   []interface{}{"DEBUG=true", "APP=test", "LEVEL=info"},
+			expected: []interface{}{"DEBUG=true", "APP=test"},
+			want:     true,
+		},
+		{
+			name:     "array does not contain all strings in expected array",
+			actual:   []interface{}{"DEBUG=true", "APP=test"},
+			expected: []interface{}{"DEBUG=true", "LEVEL=info"},
+			want:     false,
+		},
+		{
+			name:     "boolean equals boolean",
+			actual:   true,
+			expected: true,
+			want:     true,
+		},
+		{
+			name:     "boolean does not equal boolean",
+			actual:   true,
+			expected: false,
+			want:     false,
+		},
+		{
+			name:     "nil equals nil",
+			actual:   nil,
+			expected: nil,
+			want:     true,
+		},
+		{
+			name:     "nil does not equal non-nil",
+			actual:   nil,
+			expected: "something",
+			want:     false,
+		},
+		{
+			name:     "array with partial string match",
+			actual:   []interface{}{"DEBUG_LEVEL=verbose", "APP=test"},
+			expected: "DEBUG",
+			want:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := containsValue(tt.actual, tt.expected)
+
+			if got != tt.want {
+				t.Errorf("containsValue() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
