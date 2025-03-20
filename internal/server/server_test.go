@@ -149,56 +149,70 @@ func (s *Server) startWithContext(ctx context.Context) error {
 	return s.server.Serve(listener)
 }
 
-func TestApplyPattern(t *testing.T) {
+func TestApplyRewriteActions(t *testing.T) {
 	tests := []struct {
-		name     string
-		body     map[string]interface{}
-		pattern  config.Pattern
-		want     bool
-		wantBody map[string]interface{}
+		name         string
+		body         map[string]interface{}
+		actions      []config.RewriteAction
+		wantBody     map[string]interface{}
+		wantModified bool
 	}{
 		{
 			name: "replace env var",
 			body: map[string]interface{}{
 				"Env": []interface{}{"DEBUG=true", "OTHER=value"},
 			},
-			pattern: config.Pattern{
-				Action: "replace",
-				Match:  "DEBUG=true",
-				Value:  "DEBUG=false",
+			actions: []config.RewriteAction{
+				{
+					Action: "replace",
+					Contains: map[string]interface{}{
+						"Env": "DEBUG=true",
+					},
+					Update: map[string]interface{}{
+						"Env": []interface{}{"DEBUG=false", "OTHER=value"},
+					},
+				},
 			},
-			want: true,
 			wantBody: map[string]interface{}{
 				"Env": []interface{}{"DEBUG=false", "OTHER=value"},
 			},
+			wantModified: true,
 		},
 		{
 			name: "upsert env var",
 			body: map[string]interface{}{
 				"Env": []interface{}{"EXISTING=true"},
 			},
-			pattern: config.Pattern{
-				Action: "upsert",
-				Value:  "NEW=value",
+			actions: []config.RewriteAction{
+				{
+					Action: "upsert",
+					Update: map[string]interface{}{
+						"Env": []interface{}{"NEW=value"},
+					},
+				},
 			},
-			want: true,
 			wantBody: map[string]interface{}{
 				"Env": []interface{}{"EXISTING=true", "NEW=value"},
 			},
+			wantModified: true,
 		},
 		{
 			name: "delete env var",
 			body: map[string]interface{}{
 				"Env": []interface{}{"DEBUG=true", "KEEP=value"},
 			},
-			pattern: config.Pattern{
-				Action: "delete",
-				Match:  "DEBUG=*",
+			actions: []config.RewriteAction{
+				{
+					Action: "delete",
+					Contains: map[string]interface{}{
+						"Env": []interface{}{"DEBUG=true"},
+					},
+				},
 			},
-			want: true,
 			wantBody: map[string]interface{}{
 				"Env": []interface{}{"KEEP=value"},
 			},
+			wantModified: true,
 		},
 		{
 			name: "replace boolean field",
@@ -207,24 +221,49 @@ func TestApplyPattern(t *testing.T) {
 					"Privileged": true,
 				},
 			},
-			pattern: config.Pattern{
-				Action: "replace",
-				Match:  true,
-				Value:  false,
+			actions: []config.RewriteAction{
+				{
+					Action: "replace",
+					Contains: map[string]interface{}{
+						"HostConfig": map[string]interface{}{
+							"Privileged": true,
+						},
+					},
+					Update: map[string]interface{}{
+						"HostConfig": map[string]interface{}{
+							"Privileged": false,
+						},
+					},
+				},
 			},
-			want: true,
 			wantBody: map[string]interface{}{
 				"HostConfig": map[string]interface{}{
 					"Privileged": false,
 				},
 			},
+			wantModified: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if !reflect.DeepEqual(tt.body, tt.wantBody) {
-				t.Errorf("body after applyPattern() = %v, want %v", tt.body, tt.wantBody)
+			// Make a copy of the body to avoid modifying the test case
+			body := make(map[string]interface{})
+			for k, v := range tt.body {
+				body[k] = v
+			}
+
+			// Apply the rewrite actions
+			modified := applyRewriteActions(body, tt.actions)
+
+			// Check if the body was modified as expected
+			if modified != tt.wantModified {
+				t.Errorf("applyRewriteActions() modified = %v, want %v", modified, tt.wantModified)
+			}
+
+			// Check if the body matches the expected result
+			if !reflect.DeepEqual(body, tt.wantBody) {
+				t.Errorf("body after applyRewriteActions() = %v, want %v", body, tt.wantBody)
 			}
 		})
 	}

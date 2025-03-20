@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"docker-socket-proxy/internal/management"
 	"docker-socket-proxy/internal/proxy/config"
 	"docker-socket-proxy/internal/storage"
+	"reflect"
 )
 
 // Server represents the Docker socket proxy server
@@ -421,104 +423,89 @@ func matchesStructure(body map[string]interface{}, match map[string]interface{})
 	return true
 }
 
-// mergeStructure merges a structure into a body
+// mergeStructure merges an update structure into a body
+// If replace is true, it replaces existing values; otherwise, it adds to them
 func mergeStructure(body map[string]interface{}, update map[string]interface{}, replace bool) bool {
 	modified := false
 
 	for key, updateValue := range update {
-		// Handle nested maps
+		// If the update value is a map, recurse into it
 		if updateMap, ok := updateValue.(map[string]interface{}); ok {
-			// If the key doesn't exist or isn't a map, create it
-			if actualValue, exists := body[key]; !exists {
-				body[key] = updateMap
-				modified = true
-			} else if actualMap, ok := actualValue.(map[string]interface{}); ok {
-				// Recurse into the nested map
-				if mergeStructure(actualMap, updateMap, replace) {
+			if actualValue, exists := body[key]; exists {
+				if actualMap, ok := actualValue.(map[string]interface{}); ok {
+					if mergeStructure(actualMap, updateMap, replace) {
+						modified = true
+					}
+				} else if replace {
+					body[key] = updateMap
 					modified = true
 				}
-			} else if replace {
-				// Replace the value
+			} else {
 				body[key] = updateMap
 				modified = true
 			}
 		} else if updateArray, ok := updateValue.([]interface{}); ok {
-			// Handle arrays (like Env)
-			if key == "Env" {
-				// Special handling for Env arrays
-				if actualValue, exists := body[key]; !exists {
-					// Key doesn't exist, create it
-					body[key] = updateArray
-					modified = true
-				} else if actualArray, ok := actualValue.([]interface{}); ok {
-					// Merge or replace the array
+			// Handle arrays
+			if actualValue, exists := body[key]; exists {
+				if actualArray, ok := actualValue.([]interface{}); ok {
 					if replace {
-						// For replace, we need to check each item
-						newArray := make([]interface{}, 0, len(actualArray))
-						replaced := false
+						// For replace, we need to handle array replacements intelligently
+						newArray := make([]interface{}, 0)
+						replacedIndices := make(map[int]bool)
 
-						for _, item := range actualArray {
-							// Check if this item should be replaced
-							shouldReplace := false
-							for _, updateItem := range updateArray {
-								if containsValue(item, updateItem) {
-									shouldReplace = true
+						// First, identify which elements in the original array should be replaced
+						for _, updateItem := range updateArray {
+
+							// Try to find a matching element to replace
+							for i, actualItem := range actualArray {
+								if !replacedIndices[i] && isReplacementCandidate(actualItem, updateItem) {
+									// Mark this index as replaced
+									replacedIndices[i] = true
 									break
 								}
 							}
 
-							if shouldReplace {
-								// Add the update items instead
-								for _, updateItem := range updateArray {
-									newArray = append(newArray, updateItem)
-								}
-								replaced = true
-								break
-							} else {
-								// Keep the original item
-								newArray = append(newArray, item)
+							// Add the update item to the new array
+							newArray = append(newArray, updateItem)
+						}
+
+						// Add all non-replaced items from the original array
+						for i, actualItem := range actualArray {
+							if !replacedIndices[i] {
+								newArray = append(newArray, actualItem)
 							}
 						}
 
-						if replaced {
-							body[key] = newArray
-							modified = true
-						} else if len(updateArray) > 0 {
-							// If no items were replaced but we have updates, append them
-							body[key] = append(actualArray, updateArray...)
+						body[key] = newArray
+						modified = true
+					} else {
+						// For upsert, append items not already in the array
+						newItems := false
+						for _, updateItem := range updateArray {
+							found := false
+							for _, actualItem := range actualArray {
+								if reflect.DeepEqual(actualItem, updateItem) {
+									found = true
+									break
+								}
+							}
+							if !found {
+								actualArray = append(actualArray, updateItem)
+								newItems = true
+							}
+						}
+						if newItems {
+							body[key] = actualArray
 							modified = true
 						}
-					} else {
-						// For upsert, just append
-						body[key] = append(actualArray, updateArray...)
-						modified = true
 					}
 				} else if replace {
-					// Replace the value
 					body[key] = updateArray
 					modified = true
 				}
 			} else {
-				// Regular array handling
-				if actualValue, exists := body[key]; !exists {
-					// Key doesn't exist, create it
-					body[key] = updateArray
-					modified = true
-				} else if actualArray, ok := actualValue.([]interface{}); ok {
-					if replace {
-						// Replace the array
-						body[key] = updateArray
-						modified = true
-					} else {
-						// Merge the arrays
-						body[key] = append(actualArray, updateArray...)
-						modified = true
-					}
-				} else if replace {
-					// Replace the value
-					body[key] = updateArray
-					modified = true
-				}
+				body[key] = updateArray
+				modified = true
 			}
 		} else {
 			// Handle simple values
@@ -530,6 +517,39 @@ func mergeStructure(body map[string]interface{}, update map[string]interface{}, 
 	}
 
 	return modified
+}
+
+// isReplacementCandidate determines if an actual item should be replaced by an update item
+func isReplacementCandidate(actual, update interface{}) bool {
+	// For strings, check if they have the same prefix before "="
+	if actualStr, ok := actual.(string); ok {
+		if updateStr, ok := update.(string); ok {
+			actualParts := strings.SplitN(actualStr, "=", 2)
+			updateParts := strings.SplitN(updateStr, "=", 2)
+
+			// If both have a key part (before "="), compare those
+			if len(actualParts) > 1 && len(updateParts) > 1 {
+				return actualParts[0] == updateParts[0]
+			}
+		}
+	}
+
+	// For maps, check if they have the same key structure
+	if actualMap, ok := actual.(map[string]interface{}); ok {
+		if updateMap, ok := update.(map[string]interface{}); ok {
+			// Check if they have at least one matching key-value pair
+			for key, updateVal := range updateMap {
+				if actualVal, exists := actualMap[key]; exists {
+					if reflect.DeepEqual(actualVal, updateVal) {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	// For other types, check for equality
+	return reflect.DeepEqual(actual, update)
 }
 
 // deleteMatchingFields deletes fields that match a structure

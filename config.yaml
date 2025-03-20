@@ -55,4 +55,4 @@ rules:
         - action: "delete"
           contains:
             Env:
-              - "PANTS=FOO"
+              - "PANTS=.*"
