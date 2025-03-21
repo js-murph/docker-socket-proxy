@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -10,20 +12,29 @@ import (
 
 // captureOutput captures stdout during a function execution
 func captureOutput(f func()) string {
-	// Save and restore stdout
+	// Save the original stdout
 	oldStdout := os.Stdout
+
+	// Create a pipe
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	// Run the function
+	// Call the function
 	f()
 
-	// Restore stdout and read captured output
+	// Close the write end of the pipe to flush it
 	w.Close()
+
+	// Restore the original stdout
 	os.Stdout = oldStdout
 
-	var buf strings.Builder
-	io.Copy(&buf, r)
+	// Read the output
+	var buf bytes.Buffer
+	_, err := io.Copy(&buf, r)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to capture output: %v", err))
+	}
+
 	return buf.String()
 }
 

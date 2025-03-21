@@ -23,7 +23,6 @@ type ProxyHandler struct {
 	dockerSocket  string
 	socketConfigs map[string]*config.SocketConfig
 	configMu      *sync.RWMutex
-	reverseProxy  *httputil.ReverseProxy
 }
 
 // NewProxyHandler creates a new proxy handler

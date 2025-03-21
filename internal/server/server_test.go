@@ -345,7 +345,11 @@ func TestApplyRewriteRules(t *testing.T) {
 			if tt.wantModified {
 				body, _ := io.ReadAll(tt.request.Body)
 				var got map[string]interface{}
-				json.Unmarshal(body, &got)
+				err = json.Unmarshal(body, &got)
+				if err != nil {
+					t.Errorf("Failed to unmarshal response body: %v", err)
+					return
+				}
 
 				if !reflect.DeepEqual(got, tt.wantBody) {
 					t.Errorf("body after rewrite = %v, want %v", got, tt.wantBody)

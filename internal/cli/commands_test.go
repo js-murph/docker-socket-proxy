@@ -58,8 +58,10 @@ func TestRunCreate(t *testing.T) {
 			}
 		}
 
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("/var/run/docker-proxy/test-socket.sock"))
+		_, err := w.Write([]byte("/var/run/docker-proxy/test-socket.sock"))
+		if err != nil {
+			t.Errorf("Failed to write response: %v", err)
+		}
 	}))
 	server.Listener = l
 	server.Start()
@@ -111,8 +113,10 @@ func TestRunDelete(t *testing.T) {
 			t.Errorf("Expected Socket-Path header to be /var/run/test-socket.sock, got %s",
 				r.Header.Get("Socket-Path"))
 		}
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Socket /var/run/test-socket.sock deleted successfully"))
+		_, err := w.Write([]byte("Socket deleted successfully"))
+		if err != nil {
+			t.Errorf("Failed to write response: %v", err)
+		}
 	}))
 	server.Listener = l
 	server.Start()
@@ -163,7 +167,10 @@ func TestRunList(t *testing.T) {
 
 		// Return a list of sockets
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]string{"socket1.sock", "socket2.sock"})
+		_, err := w.Write([]byte(`["socket1.sock", "socket2.sock"]`))
+		if err != nil {
+			t.Errorf("Failed to write response: %v", err)
+		}
 	}))
 	server.Listener = l
 	server.Start()
@@ -217,12 +224,15 @@ func TestRunDescribe(t *testing.T) {
 		// Return a YAML config
 		w.Header().Set("Content-Type", "application/yaml")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`rules:
+		_, err := w.Write([]byte(`rules:
   acls:
   - match:
       path: /test
       method: GET
     action: allow`))
+		if err != nil {
+			t.Errorf("Failed to write response: %v", err)
+		}
 	}))
 	server.Listener = l
 	server.Start()
@@ -273,8 +283,10 @@ func TestRunClean(t *testing.T) {
 			t.Errorf("Expected /sockets path, got %s", r.URL.Path)
 		}
 
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("All sockets have been removed successfully"))
+		_, err := w.Write([]byte("All sockets have been removed successfully"))
+		if err != nil {
+			t.Errorf("Failed to write response: %v", err)
+		}
 	}))
 	server.Listener = l
 	server.Start()

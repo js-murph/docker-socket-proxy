@@ -132,7 +132,10 @@ func TestProxyHandlerWithMock(t *testing.T) {
 	// Create a mock Docker API server
 	dockerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"message":"OK"}`))
+		_, err := w.Write([]byte(`{"message":"OK"}`))
+		if err != nil {
+			t.Errorf("Failed to write response: %v", err)
+		}
 	}))
 	defer dockerServer.Close()
 
@@ -215,7 +218,12 @@ func (h *TestProxyHandler) ServeHTTPWithSocket(w http.ResponseWriter, r *http.Re
 
 	// Get the socket configuration
 	h.configMu.RLock()
-	socketConfig, _ := h.socketConfigs[socketPath]
+	socketConfig, exists := h.socketConfigs[socketPath]
+	if !exists {
+		// Handle the case where the key doesn't exist
+		http.Error(w, "Socket configuration not found", http.StatusInternalServerError)
+		return
+	}
 	h.configMu.RUnlock()
 
 	// Check if the request is allowed by the ACLs
@@ -264,7 +272,13 @@ func (h *TestProxyHandler) ServeHTTPWithSocket(w http.ResponseWriter, r *http.Re
 	w.WriteHeader(resp.StatusCode)
 
 	// Copy the response body
-	io.Copy(w, resp.Body)
+	_, err = io.Copy(w, resp.Body)
+	if err != nil {
+		log.Error("Failed to copy response body", "error", err)
+		// Since we've already started writing the response, we can't change the status code
+		// Just log the error and return
+		return
+	}
 }
 
 // checkACLs checks if a request is allowed by the ACLs

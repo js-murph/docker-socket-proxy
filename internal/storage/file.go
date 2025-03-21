@@ -23,11 +23,6 @@ func NewFileStore(managementSocket string) *FileStore {
 	}
 }
 
-func (s *FileStore) configPath(socketPath string) string {
-	// Create a config file next to each socket with .config extension
-	return socketPath + ".config"
-}
-
 // SaveConfig saves a socket configuration
 func (s *FileStore) SaveConfig(socketPath string, cfg *config.SocketConfig) error {
 	log := logging.GetLogger()

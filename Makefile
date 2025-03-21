@@ -1,4 +1,4 @@
-.PHONY: build test release lint
+.PHONY: build test release lint run
 
 all: lint test build
 
@@ -10,6 +10,9 @@ test:
 
 lint:
 	golangci-lint run
+
+run:
+	go run cmd/main.go daemon
 
 release:
 #	TODO: Add release steps

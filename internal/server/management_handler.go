@@ -285,7 +285,11 @@ func (h *ManagementHandler) handleListSockets(w http.ResponseWriter, r *http.Req
 		log.Warn("Server not found in context - returning empty list for test compatibility")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode([]string{})
+		if err := json.NewEncoder(w).Encode([]string{}); err != nil {
+			log.Error("Failed to encode empty response", "error", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
 		return
 	}
 
@@ -345,10 +349,18 @@ func (h *ManagementHandler) handleDescribeSocket(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Set content type and return the YAML
+	// Set the content type header
 	w.Header().Set("Content-Type", "application/yaml")
 	w.WriteHeader(http.StatusOK)
-	w.Write(yamlData)
+
+	// Write the YAML data
+	_, err = w.Write(yamlData)
+	if err != nil {
+		log.Error("Failed to write YAML response", "error", err)
+		// At this point, headers have already been sent, so we can't send an HTTP error
+		// Just log the error and return
+		return
+	}
 }
 
 func (h *ManagementHandler) Cleanup() {
@@ -416,17 +428,25 @@ func (h *ManagementHandler) cleanSockets(w http.ResponseWriter, r *http.Request)
 	// Return the result
 	if len(errs) > 0 {
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":  "error",
 			"message": "Failed to delete some sockets",
 			"errors":  errs,
-		})
+		}); err != nil {
+			log.Error("Failed to encode error response", "error", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":  "success",
 		"message": fmt.Sprintf("Deleted %d sockets", len(sockets)),
-	})
+	}); err != nil {
+		log.Error("Failed to encode success response", "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
 }
