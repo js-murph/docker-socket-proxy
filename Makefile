@@ -14,8 +14,8 @@ lint:
 run:
 	go run cmd/main.go daemon
 
-release:
-	@echo "Creating a new release..."
+version:
+	@echo "Creating a new version..."
 	@echo "Current version: $$(svu current)"
 	@echo "Next version: $$(svu next)"
 	@read -p "Continue with this version? [y/N] " confirm; \
@@ -26,6 +26,18 @@ release:
 	else \
 		echo "Release cancelled"; \
 	fi
+
+release:
+	@echo "Creating a new release for $$(svu current)..."
+	@read -p "Continue with this version? [y/N] " confirm; \
+	if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
+		echo "Running goreleaser..."; \
+		goreleaser release --clean; \
+		echo "Release $$(svu current) completed successfully!"; \
+	else \
+		echo "Release cancelled"; \
+	fi
+
 
 help:
 	@echo "Usage: make <target>"

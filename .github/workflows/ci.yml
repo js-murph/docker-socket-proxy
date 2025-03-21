@@ -16,7 +16,7 @@ jobs:
       - name: Init Hermit
         uses: cashapp/activate-hermit@v1
       - name: Lint
-        run: golangci-lint run
+        run: make lint
 
   test:
     name: Test
@@ -27,4 +27,4 @@ jobs:
       - name: Init Hermit
         uses: cashapp/activate-hermit@v1
       - name: Test
-        run: gotestsum
+        run: make test

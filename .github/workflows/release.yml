@@ -14,6 +14,7 @@ jobs:
       - name: Init Hermit
         uses: cashapp/activate-hermit@v1
       - name: Run GoReleaser
-        run: goreleaser release --clean
+        run: make release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          confirm: "y"
