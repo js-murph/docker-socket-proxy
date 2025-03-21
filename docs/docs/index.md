@@ -1,6 +1,6 @@
 # Docker Socket Proxy
 
-A proxy for the Docker socket that allows for adding ACLs and rewriting requests and responses. This binary contains a server that runs the proxy and a CLI for managing it.
+A secure proxy for Docker socket with fine-grained access control and request rewriting capabilities.
 
 ## Features
 
@@ -20,16 +20,12 @@ But maybe you are doing some docker-in-docker in CI and want to make sure that a
 Grab it from the releases page and move it to a directory in your PATH.
 
 ```bash
-curl -sSL https://github.com/js-murph/docker-proxy-socket/releases/latest/download/docker-socket-proxy.tgz
+curl -sSL https://github.com/js-murph/docker-socket-proxy/releases/latest/download/docker-socket-proxy.tgz
 tar -xzf docker-socket-proxy.tgz
 mv docker-socket-proxy /usr/local/bin/docker-socket-proxy
 ```
 
-There's an example configuration file in [examples/config.yaml](examples/config.yaml). See the [docs](https://js-murph.github.io/docker-proxy-socket/docs/configuration) for more information.
-
-You can also find an example systemd service file in [examples/docker-socket-proxy.service](examples/docker-socket-proxy.service).
-
-## Usage
+## Quick Start
 
 To start the server run:
 
@@ -45,24 +41,38 @@ docker-socket-proxy socket create -c /path/to/config.yaml
 
 This will return a socket that you can use instead of the Docker socket with the rules applied.
 
-## Local Development
+See the [Getting Started](getting-started.md) section for more details.
 
-First ensure you have [hermit installed](https://cashapp.github.io/hermit/#quickstart).
+## Configuration Example
 
-```bash
-git clone https://github.com/js-murph/docker-socket-proxy.git
-cd docker-socket-proxy
-. bin/activate-hermit
+```yaml
+config:
+  propagate_socket: "/var/run/docker.sock"
+
+rules:
+  - match:
+      path: "/v1.*/volumes"
+      method: "GET"
+    actions:
+      - action: "deny"
+        reason: "Listing volumes is restricted"
+
+  - match:
+      path: "/v1.*/containers/create"
+      method: "POST"
+      contains:
+        Env:
+          - "BLOCK=true"
+    actions:
+      - action: "deny"
+        reason: "Blocked creation of containers with restricted env variables"
+
+  - match:
+      path: "/.*"
+      method: ".*"
+    actions:
+      - action: "allow"
+        reason: "Allow all other requests, the default is to block everything"
 ```
 
-To run the tests:
-
-```bash
-gotestsum
-```
-
-To build the binary:
-
-```bash
-go build -o docker-socket-proxy cmd/main.go
-```
+See the [Configuration](configuration/index.md) section for more details.

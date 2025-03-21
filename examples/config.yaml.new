@@ -1,0 +1,54 @@
+config:
+  propagate_socket: "/var/run/docker.sock"
+
+rules:
+  - match:
+      path: "/v1.*/volumes"
+      method: "GET"
+    actions:
+      - action: "deny"
+        reason: "Listing volumes is restricted"
+
+  - match:
+      path: "/v1.*/containers/create"
+      method: "POST"
+      contains:
+        Env:
+          - "BLOCK=true"
+    actions:
+      - action: "deny"
+        reason: "Blocked creation of containers with restricted env variables"
+
+  - match:
+      path: "/.*"
+      method: ".*"
+    actions:
+      - action: "allow"
+        reason: "Allow all other requests, the default is to block everything"
+
+  - match:
+      path: "/v1.*/containers/create"
+      method: "POST"
+    actions:
+      - action: "upsert"
+        update:
+          Env:
+            - "FUN=yes"
+      - action: "replace"
+        contains:
+          Env:
+            - "DEBUG=true"
+        update:
+          Env:
+            - "DEBUG=false"
+      - action: "replace"
+        contains:
+          HostConfig:
+            Privileged: true
+        update:
+          HostConfig:
+            Privileged: false
+      - action: "delete"
+        contains:
+          Env:
+            - "PANTS=.*"
