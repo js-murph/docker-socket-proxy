@@ -98,9 +98,9 @@ func (h *ProxyHandler) checkACLs(r *http.Request, socketConfig *config.SocketCon
 		return true, ""
 	}
 
-	// If there are no ACLs, deny by default
+	// If there are no ACLs, allow by default
 	if len(socketConfig.Rules.ACLs) == 0 {
-		return false, "no ACLs defined"
+		return true, ""
 	}
 
 	// Log the request details for debugging
@@ -140,9 +140,9 @@ func (h *ProxyHandler) checkACLs(r *http.Request, socketConfig *config.SocketCon
 		}
 	}
 
-	// If no rule matches, deny by default
-	log.Info("No matching rules found, denying by default")
-	return false, "No matching allow rules"
+	// If no rule matches, allow by default
+	log.Info("No matching rules found, allowing by default")
+	return true, ""
 }
 
 // ruleMatches checks if a request matches an ACL rule

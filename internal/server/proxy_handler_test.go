@@ -69,7 +69,7 @@ func TestProxyHandler_CheckACLRules(t *testing.T) {
 			wantReason: "method not allowed",
 		},
 		{
-			name:       "no matching rules defaults to deny",
+			name:       "no matching rules defaults to allow",
 			socketPath: "/tmp/test.sock",
 			config: &config.SocketConfig{
 				Rules: config.RuleSet{
@@ -82,8 +82,8 @@ func TestProxyHandler_CheckACLRules(t *testing.T) {
 				},
 			},
 			request:    httptest.NewRequest("GET", "/test", nil),
-			want:       false,
-			wantReason: "No matching allow rules",
+			want:       true,
+			wantReason: "",
 		},
 		{
 			name:       "first matching rule takes precedence",
@@ -288,9 +288,9 @@ func (h *TestProxyHandler) checkACLs(r *http.Request, socketConfig *config.Socke
 		return true, ""
 	}
 
-	// If there are no ACLs, deny by default
+	// If there are no ACLs, allow by default
 	if len(socketConfig.Rules.ACLs) == 0 {
-		return false, "no ACLs defined"
+		return true, ""
 	}
 
 	// Check each ACL rule
@@ -300,13 +300,13 @@ func (h *TestProxyHandler) checkACLs(r *http.Request, socketConfig *config.Socke
 			if rule.Action == "allow" {
 				return true, ""
 			} else {
-				return false, "method not allowed"
+				return false, rule.Reason
 			}
 		}
 	}
 
-	// If no rule matches, deny by default
-	return false, "No matching allow rules"
+	// If no rule matches, allow by default
+	return true, ""
 }
 
 // ruleMatches checks if a request matches an ACL rule
