@@ -17,41 +17,41 @@ type SocketConfig struct {
 }
 
 type ConfigSet struct {
-	PropagateSocket string `yaml:"propagate_socket"`
+	PropagateSocket string `json:"propagate_socket" yaml:"propagate_socket"`
 }
 
 type RuleSet struct {
-	ACLs     []Rule        `yaml:"acls"`
-	Rewrites []RewriteRule `yaml:"rewrites"`
+	ACLs     []Rule        `json:"acls" yaml:"acls"`
+	Rewrites []RewriteRule `json:"rewrites" yaml:"rewrites"`
 }
 
 type RewriteRule struct {
-	Match   Match           `yaml:"match"`
-	Actions []RewriteAction `yaml:"actions"`
+	Match   Match           `json:"match" yaml:"match"`
+	Actions []RewriteAction `json:"actions" yaml:"actions"`
 }
 
 type RewriteAction struct {
-	Action   string                 `yaml:"action"`
-	Contains map[string]interface{} `yaml:"contains,omitempty"`
-	Update   map[string]interface{} `yaml:"update,omitempty"`
+	Action   string                 `json:"action" yaml:"action"`
+	Contains map[string]interface{} `json:"contains,omitempty" yaml:"contains,omitempty"`
+	Update   map[string]interface{} `json:"update,omitempty" yaml:"update,omitempty"`
 }
 
 type Pattern struct {
-	Match  interface{} `yaml:"match,omitempty"` // Optional match value for updates
-	Value  interface{} `yaml:"value,omitempty"` // The value to set/update
-	Action string      `yaml:"action"`          // "replace" (default), "upsert", or "delete"
+	Match  interface{} `json:"match,omitempty" yaml:"match,omitempty"` // Optional match value for updates
+	Value  interface{} `json:"value,omitempty" yaml:"value,omitempty"` // The value to set/update
+	Action string      `json:"action" yaml:"action"`                   // "replace" (default), "upsert", or "delete"
 }
 
 type Rule struct {
-	Match  Match  `yaml:"match"`
-	Action string `yaml:"action"`
-	Reason string `yaml:"reason,omitempty"`
+	Match  Match  `json:"match" yaml:"match"`
+	Action string `json:"action" yaml:"action"`
+	Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
 }
 
 type Match struct {
-	Path     string                 `yaml:"path,omitempty" json:"path,omitempty"`
-	Method   string                 `yaml:"method,omitempty" json:"method,omitempty"`
-	Contains map[string]interface{} `yaml:"contains,omitempty" json:"contains,omitempty"`
+	Path     string                 `json:"path,omitempty" yaml:"path,omitempty"`
+	Method   string                 `json:"method,omitempty" yaml:"method,omitempty"`
+	Contains map[string]interface{} `json:"contains,omitempty" yaml:"contains,omitempty"`
 }
 
 // ValidateConfig validates the socket configuration
