@@ -123,5 +123,4 @@ Now that you have a basic proxy socket running, you can:
 
 1. Learn more about [configuration options](configuration/index.md)
 2. Explore advanced [rule configurations](configuration/rules.md)
-3. See [examples](configuration/examples.md) for common use cases
-4. Check the [CLI reference](cli-reference.md) for all available commands
+3. Check the [CLI reference](cli-reference.md) for all available commands

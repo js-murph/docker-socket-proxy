@@ -1,7 +1,7 @@
 site_name: Docker Socket Proxy
 site_description: A secure proxy for Docker socket with fine-grained access control
 site_author: John Murphy
-site_url: https://github.com/yourusername/docker-socket-proxy
+site_url: https://github.com/js-murph/docker-socket-proxy
 
 repo_name: js-murph/docker-socket-proxy
 repo_url: https://github.com/js-murph/docker-socket-proxy
@@ -51,7 +51,4 @@ nav:
   - Configuration:
       - Overview: configuration/index.md
       - Rules: configuration/rules.md
-      - Examples: configuration/examples.md
-  - API Reference: api-reference.md
   - CLI Reference: cli-reference.md
-  - Contributing: contributing.md

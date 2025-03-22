@@ -226,5 +226,3 @@ rewrites:
             managed-by: "docker-socket-proxy"
             created-at: "{{.Timestamp}}"
 ```
-
-For more examples, see the [Examples](examples.md) page.

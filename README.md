@@ -11,9 +11,11 @@ A proxy for the Docker socket that allows for adding ACLs and rewriting requests
 
 ## But Why?
 
-Every now and then against your better judgement you find yourself doing docker-in-docker, this helps you enforce some rules on the docker socket. This is _definitely not_ an appropriate replacement for a proper secure Docker runtime such as [sysbox](https://github.com/nestybox/sysbox).
+Every now and then against your better judgement you may find yourself doing docker-in-docker, this helps you enforce some rules on the docker socket.
 
-But maybe you are doing some docker-in-docker in CI and want to make sure that a particular mount is available on every subcontainer, then this might help you out. Or maybe you're running Traefik using the Docker socket and want to make sure it can only access particular endpoints, in that case we got you covered.
+Maybe you are doing some docker-in-docker in CI and want to make sure that a particular mount is available on every subcontainer. Or maybe you're running Traefik using the Docker socket and want to make sure it can only access particular endpoints, in that case we got you covered.
+
+This is _definitely not_ an appropriate replacement for a secure Docker runtime such as [sysbox](https://github.com/nestybox/sysbox).
 
 ## Installation
 

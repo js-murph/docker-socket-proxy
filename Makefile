@@ -1,4 +1,4 @@
-.PHONY: build test release lint run release help
+.PHONY: build test release lint run release release-docs help
 
 all: lint test build
 
@@ -37,6 +37,9 @@ release:
 	else \
 		echo "Release cancelled"; \
 	fi
+
+release-docs:
+	$(MAKE) -C docs release
 
 
 help:
