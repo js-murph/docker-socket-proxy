@@ -23,7 +23,7 @@ import (
 )
 
 func TestServer(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "docker-proxy-test-*")
+	tmpDir, err := os.MkdirTemp("/tmp", "docker-proxy-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,11 +46,13 @@ func TestServer(t *testing.T) {
 	l.Close()
 
 	testConfig := &config.SocketConfig{
-		Rules: config.RuleSet{
-			ACLs: []config.Rule{
-				{
-					Match:  config.Match{Path: "/test", Method: "GET"},
-					Action: "allow",
+		Rules: []config.Rule{
+			{
+				Match: config.Match{Path: "/test", Method: "GET"},
+				Actions: []config.Action{
+					{
+						Action: "allow",
+					},
 				},
 			},
 		},
@@ -67,7 +69,7 @@ func TestServer(t *testing.T) {
 		t.Fatalf("Failed to load saved config: %v", err)
 	}
 
-	if len(savedConfig.Rules.ACLs) != 1 || savedConfig.Rules.ACLs[0].Action != "allow" {
+	if savedConfig.Rules[0].Actions[0].Action != "allow" {
 		t.Fatalf("Config not saved correctly: %+v", savedConfig)
 	}
 
@@ -98,12 +100,12 @@ func TestServer(t *testing.T) {
 		t.Error("Expected test config to be loaded")
 	} else {
 		// Compare specific fields instead of using DeepEqual
-		if len(cfg.Rules.ACLs) != len(testConfig.Rules.ACLs) {
-			t.Errorf("Loaded config has %d ACL rules, want %d",
-				len(cfg.Rules.ACLs), len(testConfig.Rules.ACLs))
-		} else if cfg.Rules.ACLs[0].Action != testConfig.Rules.ACLs[0].Action {
+		if len(cfg.Rules) != len(testConfig.Rules) {
+			t.Errorf("Loaded config has %d rules, want %d",
+				len(cfg.Rules), len(testConfig.Rules))
+		} else if cfg.Rules[0].Actions[0].Action != testConfig.Rules[0].Actions[0].Action {
 			t.Errorf("Loaded config has action %s, want %s",
-				cfg.Rules.ACLs[0].Action, testConfig.Rules.ACLs[0].Action)
+				cfg.Rules[0].Actions[0].Action, testConfig.Rules[0].Actions[0].Action)
 		}
 	}
 
@@ -153,7 +155,7 @@ func TestApplyRewriteActions(t *testing.T) {
 	tests := []struct {
 		name         string
 		body         map[string]interface{}
-		actions      []config.RewriteAction
+		actions      []config.Rule
 		wantBody     map[string]interface{}
 		wantModified bool
 	}{
@@ -162,14 +164,21 @@ func TestApplyRewriteActions(t *testing.T) {
 			body: map[string]interface{}{
 				"Env": []interface{}{"DEBUG=true", "OTHER=value"},
 			},
-			actions: []config.RewriteAction{
+			actions: []config.Rule{
 				{
-					Action: "replace",
-					Contains: map[string]interface{}{
-						"Env": "DEBUG=true",
-					},
-					Update: map[string]interface{}{
-						"Env": []interface{}{"DEBUG=false", "OTHER=value"},
+					Actions: []config.Action{
+						{
+							Action: "replace",
+							Contains: map[string]interface{}{
+								"Env": "DEBUG=true",
+							},
+						},
+						{
+							Action: "replace",
+							Update: map[string]interface{}{
+								"Env": []interface{}{"DEBUG=false", "OTHER=value"},
+							},
+						},
 					},
 				},
 			},
@@ -183,11 +192,15 @@ func TestApplyRewriteActions(t *testing.T) {
 			body: map[string]interface{}{
 				"Env": []interface{}{"EXISTING=true"},
 			},
-			actions: []config.RewriteAction{
+			actions: []config.Rule{
 				{
-					Action: "upsert",
-					Update: map[string]interface{}{
-						"Env": []interface{}{"NEW=value"},
+					Actions: []config.Action{
+						{
+							Action: "upsert",
+							Update: map[string]interface{}{
+								"Env": []interface{}{"NEW=value"},
+							},
+						},
 					},
 				},
 			},
@@ -201,11 +214,15 @@ func TestApplyRewriteActions(t *testing.T) {
 			body: map[string]interface{}{
 				"Env": []interface{}{"DEBUG=true", "KEEP=value"},
 			},
-			actions: []config.RewriteAction{
+			actions: []config.Rule{
 				{
-					Action: "delete",
-					Contains: map[string]interface{}{
-						"Env": []interface{}{"DEBUG=true"},
+					Actions: []config.Action{
+						{
+							Action: "delete",
+							Contains: map[string]interface{}{
+								"Env": []interface{}{"DEBUG=true"},
+							},
+						},
 					},
 				},
 			},
@@ -221,17 +238,21 @@ func TestApplyRewriteActions(t *testing.T) {
 					"Privileged": true,
 				},
 			},
-			actions: []config.RewriteAction{
+			actions: []config.Rule{
 				{
-					Action: "replace",
-					Contains: map[string]interface{}{
-						"HostConfig": map[string]interface{}{
-							"Privileged": true,
-						},
-					},
-					Update: map[string]interface{}{
-						"HostConfig": map[string]interface{}{
-							"Privileged": false,
+					Actions: []config.Action{
+						{
+							Action: "replace",
+							Contains: map[string]interface{}{
+								"HostConfig": map[string]interface{}{
+									"Privileged": true,
+								},
+							},
+							Update: map[string]interface{}{
+								"HostConfig": map[string]interface{}{
+									"Privileged": false,
+								},
+							},
 						},
 					},
 				},
@@ -254,7 +275,27 @@ func TestApplyRewriteActions(t *testing.T) {
 			}
 
 			// Apply the rewrite actions
-			modified := applyRewriteActions(body, tt.actions)
+			modified := false
+			for _, rule := range tt.actions {
+				for _, action := range rule.Actions {
+					switch action.Action {
+					case "replace":
+						if matchesStructure(body, action.Contains) {
+							if mergeStructure(body, action.Update, true) {
+								modified = true
+							}
+						}
+					case "upsert":
+						if mergeStructure(body, action.Update, false) {
+							modified = true
+						}
+					case "delete":
+						if deleteMatchingFields(body, action.Contains) {
+							modified = true
+						}
+					}
+				}
+			}
 
 			// Check if the body was modified as expected
 			if modified != tt.wantModified {
@@ -280,31 +321,29 @@ func TestApplyRewriteRules(t *testing.T) {
 		{
 			name: "apply multiple rewrites",
 			config: &config.SocketConfig{
-				Rules: config.RuleSet{
-					Rewrites: []config.RewriteRule{
-						{
-							Match: config.Match{
-								Path:   "/v1.*/containers/create",
-								Method: "POST",
+				Rules: []config.Rule{
+					{
+						Match: config.Match{
+							Path:   "/v1.*/containers/create",
+							Method: "POST",
+						},
+						Actions: []config.Action{
+							{
+								Action: "upsert",
+								Update: map[string]interface{}{
+									"Env": []interface{}{"ADDED=true"},
+								},
 							},
-							Actions: []config.RewriteAction{
-								{
-									Action: "upsert",
-									Update: map[string]interface{}{
-										"Env": []interface{}{"ADDED=true"},
+							{
+								Action: "replace",
+								Contains: map[string]interface{}{
+									"HostConfig": map[string]interface{}{
+										"Privileged": true,
 									},
 								},
-								{
-									Action: "replace",
-									Contains: map[string]interface{}{
-										"HostConfig": map[string]interface{}{
-											"Privileged": true,
-										},
-									},
-									Update: map[string]interface{}{
-										"HostConfig": map[string]interface{}{
-											"Privileged": false,
-										},
+								Update: map[string]interface{}{
+									"HostConfig": map[string]interface{}{
+										"Privileged": false,
 									},
 								},
 							},
@@ -337,7 +376,7 @@ func TestApplyRewriteRules(t *testing.T) {
 				},
 			}
 
-			err := s.applyRewriteRules("test", tt.request)
+			err := s.applyRewriteRules(tt.request, "test")
 			if err != nil {
 				t.Fatalf("applyRewriteRules() error = %v", err)
 			}

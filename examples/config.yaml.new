@@ -20,13 +20,6 @@ rules:
         reason: "Blocked creation of containers with restricted env variables"
 
   - match:
-      path: "/.*"
-      method: ".*"
-    actions:
-      - action: "allow"
-        reason: "Allow all other requests, the default is to block everything"
-
-  - match:
       path: "/v1.*/containers/create"
       method: "POST"
     actions:

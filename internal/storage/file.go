@@ -81,7 +81,7 @@ func (s *FileStore) LoadConfig(socketPath string) (*config.SocketConfig, error) 
 	}
 
 	// Log the loaded config
-	log.Debug("Loaded config from JSON", "filename", filename, "num_acls", len(socketConfig.Rules.ACLs))
+	log.Debug("Loaded config from JSON", "filename", filename, "num_rules", len(socketConfig.Rules))
 
 	// Validate the config
 	if err := config.ValidateConfig(&socketConfig); err != nil {

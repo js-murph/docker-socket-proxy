@@ -9,9 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
-	"reflect"
 	"regexp"
-	"strings"
 	"sync"
 
 	"docker-socket-proxy/internal/logging"
@@ -59,7 +57,7 @@ func (h *ProxyHandler) ServeHTTPWithSocket(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Check if the request is allowed by the ACLs
-	allowed, reason := h.checkACLs(r, socketConfig)
+	allowed, reason := h.checkACLRules(r, socketConfig)
 	if !allowed {
 		log.Warn("Request denied by ACL",
 			"method", r.Method,
@@ -89,54 +87,49 @@ func (h *ProxyHandler) ServeHTTPWithSocket(w http.ResponseWriter, r *http.Reques
 	proxy.ServeHTTP(w, r)
 }
 
-// checkACLs checks if a request is allowed by the ACLs
-func (h *ProxyHandler) checkACLs(r *http.Request, socketConfig *config.SocketConfig) (bool, string) {
+// checkACLRules checks if a request is allowed by the ACLs
+func (h *ProxyHandler) checkACLRules(r *http.Request, socketConfig *config.SocketConfig) (bool, string) {
 	log := logging.GetLogger()
 
-	// If there's no config, allow all requests
+	// Handle nil config - allow by default
 	if socketConfig == nil {
+		log.Info("No socket configuration found, allowing by default")
 		return true, ""
 	}
 
-	// If there are no ACLs, allow by default
-	if len(socketConfig.Rules.ACLs) == 0 {
+	path := r.URL.Path
+	method := r.Method
+
+	log.Info("Checking ACL rules", "path", path, "method", method, "num_rules", len(socketConfig.Rules))
+
+	// If there are no rules, allow by default
+	if len(socketConfig.Rules) == 0 {
+		log.Info("No rules found, allowing by default")
 		return true, ""
 	}
 
-	// Log the request details for debugging
-	log.Info("Checking ACL rules",
-		"path", r.URL.Path,
-		"method", r.Method,
-		"num_rules", len(socketConfig.Rules.ACLs))
+	// Check each rule in order
+	for i, rule := range socketConfig.Rules {
+		log.Info("Checking rule", "index", i, "path", rule.Match.Path, "method", rule.Match.Method)
 
-	// Check each ACL rule
-	for i, rule := range socketConfig.Rules.ACLs {
-		// Log the rule being checked
-		log.Info("Checking rule",
-			"index", i,
-			"path", rule.Match.Path,
-			"method", rule.Match.Method,
-			"action", rule.Action)
+		// Check if the rule matches
+		if !h.ruleMatches(r, rule.Match) {
+			continue
+		}
 
-		// Check if the rule matches the request
-		matched := h.ruleMatches(r, rule.Match)
-		log.Info("Rule match result",
-			"index", i,
-			"matched", matched,
-			"path_pattern", rule.Match.Path,
-			"method_pattern", rule.Match.Method)
+		// Rule matched, process actions in order
+		log.Info("Rule match result", "index", i, "matched", true,
+			"path_pattern", rule.Match.Path, "method_pattern", rule.Match.Method)
 
-		if matched {
-			log.Info("Rule matched",
-				"index", i,
-				"action", rule.Action,
-				"reason", rule.Reason)
-
-			if rule.Action == "allow" {
-				return true, ""
-			} else {
-				return false, rule.Reason
+		for _, action := range rule.Actions {
+			if action.Action == "allow" {
+				log.Info("Allow action found", "reason", action.Reason)
+				return true, action.Reason
+			} else if action.Action == "deny" {
+				log.Info("Deny action found", "reason", action.Reason)
+				return false, action.Reason
 			}
+			// Continue with next action if not allow/deny
 		}
 	}
 
@@ -145,258 +138,66 @@ func (h *ProxyHandler) checkACLs(r *http.Request, socketConfig *config.SocketCon
 	return true, ""
 }
 
-// ruleMatches checks if a request matches an ACL rule
+// ruleMatches checks if a request matches a rule
 func (h *ProxyHandler) ruleMatches(r *http.Request, match config.Match) bool {
 	log := logging.GetLogger()
+	path := r.URL.Path
+	method := r.Method
 
-	// Check path match
+	// Check if the path matches
+	pathMatches := true
 	if match.Path != "" {
-		pathMatched, err := regexp.MatchString(match.Path, r.URL.Path)
+		var err error
+		pathMatches, err = regexp.MatchString(match.Path, path)
 		if err != nil {
-			log.Error("Invalid regex pattern for path", "pattern", match.Path, "error", err)
+			log.Error("Error matching path pattern", "error", err)
 			return false
 		}
-		if !pathMatched {
-			log.Info("Path did not match",
-				"request_path", r.URL.Path,
-				"pattern", match.Path)
-			return false
-		}
-		log.Info("Path matched",
-			"request_path", r.URL.Path,
-			"pattern", match.Path)
 	}
 
-	// Check method match
+	if !pathMatches {
+		return false
+	}
+
+	// Check if the method matches
+	methodMatches := true
 	if match.Method != "" {
-		methodMatched, err := regexp.MatchString(match.Method, r.Method)
+		var err error
+		methodMatches, err = regexp.MatchString(match.Method, method)
 		if err != nil {
-			log.Error("Invalid regex pattern for method", "pattern", match.Method, "error", err)
+			log.Error("Error matching method pattern", "error", err)
 			return false
 		}
-		if !methodMatched {
-			log.Info("Method did not match",
-				"request_method", r.Method,
-				"pattern", match.Method)
-			return false
-		}
-		log.Info("Method matched",
-			"request_method", r.Method,
-			"pattern", match.Method)
 	}
 
-	// Check contains criteria if specified
-	if len(match.Contains) > 0 && r.Method == "POST" {
-		// Only check contains for POST requests that might have a body
+	if !methodMatches {
+		return false
+	}
 
+	// Check if the body matches (for POST/PUT requests)
+	if len(match.Contains) > 0 && (method == "POST" || method == "PUT") {
 		// Read the request body
-		if r.Body == nil {
-			log.Info("Request has no body, contains check failed")
-			return false
-		}
-
-		// Read and restore the body
 		bodyBytes, err := io.ReadAll(r.Body)
 		if err != nil {
-			log.Error("Failed to read request body", "error", err)
+			log.Error("Error reading request body", "error", err)
 			return false
 		}
-		r.Body.Close()
+
+		// Restore the request body
 		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
 		// Parse the JSON body
-		var body map[string]interface{}
-		if err := json.Unmarshal(bodyBytes, &body); err != nil {
-			log.Error("Failed to parse JSON body", "error", err)
+		var bodyJSON map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &bodyJSON); err != nil {
+			log.Error("Error parsing request body", "error", err)
 			return false
 		}
 
-		// Check if the request body matches the contains criteria
-		if !matchesContains(body, match.Contains) {
-			log.Info("Request body does not match contains criteria")
+		// Check if the body matches the contains criteria
+		if !config.MatchValue(match.Contains, bodyJSON) {
 			return false
 		}
-		log.Info("Contains check passed")
 	}
 
 	return true
-}
-
-// matchesContains checks if the request body matches the contains criteria
-func matchesContains(body map[string]interface{}, contains map[string]interface{}) bool {
-	log := logging.GetLogger()
-
-	for key, expectedValue := range contains {
-		actualValue, exists := body[key]
-		if !exists {
-			log.Info("Field not found in request body", "field", key)
-			return false
-		}
-
-		// If the expected value is a map, recurse into it
-		if expectedMap, ok := expectedValue.(map[string]interface{}); ok {
-			if actualMap, ok := actualValue.(map[string]interface{}); ok {
-				if !matchesContains(actualMap, expectedMap) {
-					log.Info("Nested field does not match", "field", key)
-					return false
-				}
-			} else {
-				log.Info("Field is not a map", "field", key, "type", reflect.TypeOf(actualValue))
-				return false
-			}
-		} else if expectedArray, ok := expectedValue.([]interface{}); ok {
-			// Handle array matching
-			if actualArray, ok := actualValue.([]interface{}); ok {
-				// Check if all items in expected are in actual
-				for _, expectedItem := range expectedArray {
-					found := false
-					for _, actualItem := range actualArray {
-						if containsValue(actualItem, expectedItem) {
-							found = true
-							break
-						}
-					}
-					if !found {
-						log.Info("Array does not contain expected item",
-							"field", key,
-							"expected_item", expectedItem)
-						return false
-					}
-				}
-			} else if expectedStr, ok := expectedValue.(string); ok {
-				// Special case for string matching in arrays
-				found := false
-				for _, actualItem := range actualArray {
-					if itemStr, ok := actualItem.(string); ok && strings.Contains(itemStr, expectedStr) {
-						found = true
-						break
-					}
-				}
-				if !found {
-					log.Info("Array does not contain string",
-						"field", key,
-						"expected", expectedStr)
-					return false
-				}
-			} else {
-				log.Info("Field is not an array", "field", key, "type", reflect.TypeOf(actualValue))
-				return false
-			}
-		} else {
-			// For simple values, use containsValue
-			if !containsValue(actualValue, expectedValue) {
-				log.Info("Field value does not match expected value",
-					"field", key,
-					"actual", actualValue,
-					"expected", expectedValue)
-				return false
-			}
-		}
-
-		log.Info("Field matches expected value", "field", key)
-	}
-
-	return true
-}
-
-// containsValue checks if a value contains another value
-// This handles various types including strings, arrays, and maps
-func containsValue(actual, expected interface{}) bool {
-
-	// Handle nil values
-	if actual == nil && expected == nil {
-		return true
-	}
-	if actual == nil || expected == nil {
-		return false
-	}
-
-	// Handle different types
-	switch expectedVal := expected.(type) {
-	case string:
-		// Check if the string contains regex metacharacters
-		hasRegexChars := strings.ContainsAny(expectedVal, "^$.*+?()[]{}|\\")
-
-		// For string values
-		if actualStr, ok := actual.(string); ok {
-			if hasRegexChars {
-				// Try as regex first
-				matched, err := regexp.MatchString(expectedVal, actualStr)
-				if err == nil && matched {
-					return true
-				}
-				// Fall back to regular contains if regex fails
-			}
-			return strings.Contains(actualStr, expectedVal)
-		}
-
-		// For array values, check if any element matches
-		if actualArray, ok := actual.([]interface{}); ok {
-			for _, item := range actualArray {
-				if itemStr, ok := item.(string); ok {
-					if hasRegexChars {
-						// Try as regex first
-						matched, err := regexp.MatchString(expectedVal, itemStr)
-						if err == nil && matched {
-							return true
-						}
-						// Fall back to regular contains if regex fails
-					}
-					if strings.Contains(itemStr, expectedVal) {
-						return true
-					}
-				}
-			}
-			return false
-		}
-
-		return false
-
-	case []interface{}:
-		// Check if actual is an array
-		actualArray, ok := actual.([]interface{})
-		if !ok {
-			return false
-		}
-
-		// Empty array case
-		if len(expectedVal) == 0 && len(actualArray) == 0 {
-			return true
-		}
-
-		// Check if all expected items are in the actual array
-		for _, expectedItem := range expectedVal {
-			found := false
-			for _, actualItem := range actualArray {
-				if containsValue(actualItem, expectedItem) {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return false
-			}
-		}
-		return true
-
-	case map[string]interface{}:
-		// Check if actual is a map
-		actualMap, ok := actual.(map[string]interface{})
-		if !ok {
-			return false
-		}
-
-		// Check if all expected key-value pairs are in the actual map
-		for key, expectedMapVal := range expectedVal {
-			actualMapVal, exists := actualMap[key]
-			if !exists || !containsValue(actualMapVal, expectedMapVal) {
-				return false
-			}
-		}
-		return true
-
-	default:
-		// For other types, use direct equality
-		return reflect.DeepEqual(actual, expected)
-	}
 }

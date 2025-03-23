@@ -11,7 +11,7 @@ import (
 
 func TestFileStore(t *testing.T) {
 	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "filestore-test")
+	tempDir, err := os.MkdirTemp("/tmp", "filestore-test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -29,14 +29,16 @@ func TestFileStore(t *testing.T) {
 		Config: config.ConfigSet{
 			PropagateSocket: "/var/run/docker.sock",
 		},
-		Rules: config.RuleSet{
-			ACLs: []config.Rule{
-				{
-					Match: config.Match{
-						Path:   "/.*",
-						Method: ".*",
+		Rules: []config.Rule{
+			{
+				Match: config.Match{
+					Path:   "/.*",
+					Method: ".*",
+				},
+				Actions: []config.Action{
+					{
+						Action: "allow",
 					},
-					Action: "allow",
 				},
 			},
 		},
@@ -71,8 +73,8 @@ func TestFileStore(t *testing.T) {
 			t.Errorf("LoadConfig() got = %v, want %v", cfg.Config.PropagateSocket, testConfig.Config.PropagateSocket)
 		}
 
-		if len(cfg.Rules.ACLs) != len(testConfig.Rules.ACLs) {
-			t.Errorf("LoadConfig() got %d ACLs, want %d", len(cfg.Rules.ACLs), len(testConfig.Rules.ACLs))
+		if len(cfg.Rules) != len(testConfig.Rules) {
+			t.Errorf("LoadConfig() got %d Rules, want %d", len(cfg.Rules), len(testConfig.Rules))
 		}
 	})
 

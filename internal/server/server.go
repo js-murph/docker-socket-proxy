@@ -223,9 +223,16 @@ func (s *Server) loadExistingConfigs() error {
 		// Create a server for the socket
 		server := &http.Server{
 			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Apply rewrite rules if needed
-				if err := s.applyRewriteRules(socketPath, r); err != nil {
-					log.Error("Failed to apply rewrite rules", "error", err)
+				// Check ACL rules first - if allowed, then apply rewrites and forward
+				s.configMu.RLock()
+				socketConfig, ok := s.socketConfigs[socketPath]
+				s.configMu.RUnlock()
+
+				if ok && socketConfig != nil {
+					// Apply rewrite rules before ACL check
+					if err := s.applyRewriteRules(r, socketPath); err != nil {
+						log.Error("Failed to apply rewrite rules", "error", err)
+					}
 				}
 
 				// Serve the request
@@ -254,19 +261,13 @@ func (s *Server) loadExistingConfigs() error {
 }
 
 // applyRewriteRules applies rewrite rules to a request
-func (s *Server) applyRewriteRules(socketPath string, r *http.Request) error {
-	// Get the socket configuration
+func (s *Server) applyRewriteRules(r *http.Request, socketPath string) error {
 	s.configMu.RLock()
 	socketConfig, ok := s.socketConfigs[socketPath]
 	s.configMu.RUnlock()
 
 	if !ok || socketConfig == nil {
 		return nil // No config, no rewrites
-	}
-
-	// Check if there are any rewrite rules
-	if len(socketConfig.Rules.Rewrites) == 0 {
-		return nil
 	}
 
 	// Only apply rewrites to POST requests that might have a body
@@ -289,20 +290,54 @@ func (s *Server) applyRewriteRules(socketPath string, r *http.Request) error {
 	var body map[string]interface{}
 	if err := json.Unmarshal(bodyBytes, &body); err != nil {
 		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes)) // Restore the original body
-		return fmt.Errorf("failed to parse JSON body: %w", err)
+		return nil                                        // Not a JSON body, skip rewrites
 	}
 
-	// Check each rewrite rule
+	// Check each rule in order
 	modified := false
-	for _, rule := range socketConfig.Rules.Rewrites {
+	for _, rule := range socketConfig.Rules {
 		// Check if the rule matches
 		if !matchesRule(r, rule.Match) {
 			continue
 		}
 
-		// Apply the rewrite actions
-		if applyRewriteActions(body, rule.Actions) {
-			modified = true
+		// Process actions in order
+		for _, action := range rule.Actions {
+			// If we find an allow/deny action, stop processing
+			if action.Action == "allow" || action.Action == "deny" {
+				// Restore the original body and return
+				r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+
+				// If body was modified, apply changes before returning
+				if modified {
+					newBodyBytes, err := json.Marshal(body)
+					if err == nil {
+						r.Body = io.NopCloser(bytes.NewBuffer(newBodyBytes))
+						r.ContentLength = int64(len(newBodyBytes))
+						r.Header.Set("Content-Length", strconv.Itoa(len(newBodyBytes)))
+					}
+				}
+
+				return nil
+			}
+
+			// Apply rewrite actions
+			switch action.Action {
+			case "replace":
+				if matchesStructure(body, action.Contains) {
+					if mergeStructure(body, action.Update, true) {
+						modified = true
+					}
+				}
+			case "upsert":
+				if mergeStructure(body, action.Update, false) {
+					modified = true
+				}
+			case "delete":
+				if deleteMatchingFields(body, action.Contains) {
+					modified = true
+				}
+			}
 		}
 	}
 
@@ -362,40 +397,12 @@ func matchesRule(r *http.Request, match config.Match) bool {
 		}
 
 		// Check if the body matches the contains criteria
-		if !matchesContains(body, match.Contains) {
+		if !config.MatchValue(match.Contains, body) {
 			return false
 		}
 	}
 
 	return true
-}
-
-// applyRewriteActions applies rewrite actions to a request body
-func applyRewriteActions(body map[string]interface{}, actions []config.RewriteAction) bool {
-	modified := false
-
-	for _, action := range actions {
-		switch action.Action {
-		case "replace":
-			if matchesStructure(body, action.Contains) {
-				if mergeStructure(body, action.Update, true) {
-					modified = true
-				}
-			}
-
-		case "upsert":
-			if mergeStructure(body, action.Update, false) {
-				modified = true
-			}
-
-		case "delete":
-			if deleteMatchingFields(body, action.Contains) {
-				modified = true
-			}
-		}
-	}
-
-	return modified
 }
 
 // matchesStructure checks if a body matches a structure
@@ -415,7 +422,7 @@ func matchesStructure(body map[string]interface{}, match map[string]interface{})
 			} else {
 				return false
 			}
-		} else if !containsValue(actualValue, expectedValue) {
+		} else if !config.MatchValue(actualValue, expectedValue) {
 			return false
 		}
 	}
@@ -645,7 +652,8 @@ func deleteMatchingFields(body map[string]interface{}, match map[string]interfac
 				for _, item := range actualArray {
 					shouldDelete := false
 					for _, matchItem := range matchArray {
-						if containsValue(item, matchItem) {
+						// Use MatchValue to support regex patterns
+						if config.MatchValue(matchItem, item) {
 							shouldDelete = true
 							break
 						}
@@ -669,7 +677,7 @@ func deleteMatchingFields(body map[string]interface{}, match map[string]interfac
 			}
 		} else {
 			// Handle simple values
-			if containsValue(actualValue, matchValue) {
+			if config.MatchValue(matchValue, actualValue) {
 				delete(body, key)
 				modified = true
 			}
