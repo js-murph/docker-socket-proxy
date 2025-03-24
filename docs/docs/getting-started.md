@@ -43,32 +43,31 @@ config:
   propagate_socket: "/var/run/docker.sock"
 
 rules:
-  acls:
-    - match:
-        path: "/v1.*/volumes"
-        method: "GET"
-      action: "deny"
-      reason: "Listing volumes is restricted"
-  rewrites:
-    - match:
-        path: "/v1.*/containers/create"
-        method: "POST"
-      actions:
-        - action: "upsert"
-          update:
-            Env:
-              - "FUN=yes"
-        - action: "replace"
-          contains:
-            Env:
-              - "DEBUG=true"
-          update:
-            Env:
-              - "DEBUG=false"
-        - action: "delete"
-          contains:
-            Env:
-              - "PANTS=.*"
+  - match:
+      path: "/v1.*/volumes"
+      method: "GET"
+    actions:
+      - action: "deny"
+        reason: "Listing volumes is restricted"
+  - match:
+      path: "/v1.*/containers/create"
+      method: "POST"
+    actions:
+      - action: "upsert"
+        update:
+          Env:
+            - "FUN=yes"
+      - action: "replace"
+        contains:
+          Env:
+            - "DEBUG=true"
+        update:
+          Env:
+            - "DEBUG=false"
+      - action: "delete"
+        contains:
+          Env:
+            - "PANTS=.*"
 ```
 
 2. Create the proxy socket:

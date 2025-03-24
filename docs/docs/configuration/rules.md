@@ -1,26 +1,10 @@
 # Rules Configuration
 
-Rules define how Docker Socket Proxy handles incoming requests. The rules section is divided into two main parts: ACLs (Access Control Lists) and rewrites.
+Rules define how Docker Socket Proxy handles incoming requests. Each rule consists of a match section and an actions section.
 
 ## Rule Structure
 
-The rules section in your configuration file looks like this:
-
-```yaml
-rules:
-  acls:
-    # ACL rules for allowing or denying requests
-  rewrites:
-    # Rewrite rules for modifying requests
-```
-
-## ACL Rules
-
-ACL rules determine whether requests are allowed or denied. They are processed in order, and the first matching rule determines the outcome.
-
-### ACL Rule Structure
-
-Each ACL rule consists of:
+Each rule in your configuration file looks like this:
 
 ```yaml
 - match:
@@ -29,11 +13,12 @@ Each ACL rule consists of:
     contains:                      # Optional content matching
       Env:
         - "DEBUG=true"
-  action: "allow"                  # "allow" or "deny"
-  reason: "Allow listing containers" # Optional documentation
+  actions:
+    - action: "allow"              # Action to take
+      reason: "Allow listing containers" # Optional documentation
 ```
 
-### ACL Match Criteria
+## Match Criteria
 
 The `match` section determines when a rule applies:
 
@@ -72,50 +57,31 @@ match:
       Privileged: true
 ```
 
-### ACL Actions
+## Actions
 
-ACL rules support two actions:
+Each rule can have multiple actions. The actions are processed in order, allowing you to perform multiple operations on a single request.
 
-| Action | Description |
-|--------|-------------|
-| `allow` | Allow the request to proceed |
-| `deny` | Deny the request and return an error |
+### Allow Action
 
-For both actions, you can provide a `reason` field for documentation:
+Allows the request to proceed:
 
 ```yaml
-action: "deny"
-reason: "Privileged containers are not allowed"
+actions:
+  - action: "allow"
+    reason: "Allow listing containers"
 ```
 
-## Rewrite Rules
+### Deny Action
 
-Rewrite rules modify the content of requests before they're sent to Docker. They allow you to add, modify, or remove fields from the request body.
-
-### Rewrite Rule Structure
-
-Each rewrite rule consists of:
+Denies the request and returns an error:
 
 ```yaml
-- match:
-    path: "/v1.*/containers/create"  # Regex pattern for API path
-    method: "POST"                   # HTTP method
-  actions:
-    - action: "upsert"               # Type of modification
-      update:                        # Fields to update
-        Env:
-          - "SECURE=true"
+actions:
+  - action: "deny"
+    reason: "Privileged containers are not allowed"
 ```
 
-### Rewrite Match Criteria
-
-Rewrite rules use the same match criteria as ACL rules (path, method, and optionally contains).
-
-### Rewrite Actions
-
-Each rewrite rule can have multiple actions. The actions are applied in order, allowing you to perform multiple modifications on a single request.
-
-#### Upsert Action
+### Upsert Action
 
 Adds or updates fields in the request:
 
@@ -129,7 +95,7 @@ actions:
         ReadonlyRootfs: true
 ```
 
-#### Replace Action
+### Replace Action
 
 Replaces matching fields in the request:
 
@@ -146,7 +112,7 @@ actions:
 
 The `contains` field specifies which fields to match, and the `update` field specifies the replacement values.
 
-#### Delete Action
+### Delete Action
 
 Deletes matching fields from the request:
 
@@ -162,67 +128,76 @@ The `contains` field supports regular expressions for matching array elements li
 
 ## Processing Order
 
-1. ACL rules are processed first, in order
-2. If the request is allowed by ACL rules, rewrite rules are processed
-3. Rewrite rules are processed in order, and all matching rules are applied
-4. The modified request is sent to Docker
+Rules are processed sequentially in the order they appear in the configuration file. For each rule:
+
+1. The request is checked against the `match` criteria
+2. If the match succeeds, the `actions` are applied in order
+3. If an action is `allow` or `deny`, rule processing stops
+4. Otherwise, processing continues with the next rule
 
 ## Examples
 
 ### Deny Privileged Containers
 
 ```yaml
-acls:
-  - match:
-      path: "/v1.*/containers/create"
-      method: "POST"
-      contains:
-        HostConfig:
-          Privileged: true
-    action: "deny"
-    reason: "Privileged containers are not allowed"
+- match:
+    path: "/v1.*/containers/create"
+    method: "POST"
+    contains:
+      HostConfig:
+        Privileged: true
+  actions:
+    - action: "deny"
+      reason: "Privileged containers are not allowed"
 ```
 
 ### Force Read-Only Root Filesystem
 
 ```yaml
-rewrites:
-  - match:
-      path: "/v1.*/containers/create"
-      method: "POST"
-    actions:
-      - action: "upsert"
-        update:
-          HostConfig:
-            ReadonlyRootfs: true
+- match:
+    path: "/v1.*/containers/create"
+    method: "POST"
+  actions:
+    - action: "upsert"
+      update:
+        HostConfig:
+          ReadonlyRootfs: true
 ```
 
 ### Remove Sensitive Environment Variables
 
 ```yaml
-rewrites:
-  - match:
-      path: "/v1.*/containers/create"
-      method: "POST"
-    actions:
-      - action: "delete"
-        contains:
-          Env:
-            - "AWS_SECRET_.*"
-            - "PASSWORD=.*"
+- match:
+    path: "/v1.*/containers/create"
+    method: "POST"
+  actions:
+    - action: "delete"
+      contains:
+        Env:
+          - "AWS_SECRET_.*"
+          - "PASSWORD=.*"
 ```
 
 ### Add Required Labels
 
 ```yaml
-rewrites:
-  - match:
-      path: "/v1.*/containers/create"
-      method: "POST"
-    actions:
-      - action: "upsert"
-        update:
-          Labels:
-            managed-by: "docker-socket-proxy"
-            created-at: "{{.Timestamp}}"
+- match:
+    path: "/v1.*/containers/create"
+    method: "POST"
+  actions:
+    - action: "upsert"
+      update:
+        Labels:
+          socket-proxy: "docker-socket-proxy"
+```
+
+### Default Deny Rule
+
+```yaml
+- match:
+    path: "/.*"
+    method: ".*"
+  actions:
+    - action: "deny"
+      reason: "Deny all other requests, the default is to allow everything"
 ```
