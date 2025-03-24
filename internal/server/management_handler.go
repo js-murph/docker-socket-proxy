@@ -15,7 +15,6 @@ import (
 	"docker-socket-proxy/internal/storage"
 
 	"github.com/google/uuid"
-	"gopkg.in/yaml.v3"
 )
 
 type ManagementHandler struct {
@@ -71,16 +70,7 @@ func (h *ManagementHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // validateAndDecodeConfig validates and decodes the socket configuration from the request
 func (h *ManagementHandler) validateAndDecodeConfig(r *http.Request) (*config.SocketConfig, error) {
 	// Default config if none is provided
-	socketConfig := &config.SocketConfig{
-		Rules: config.RuleSet{
-			ACLs: []config.Rule{
-				{
-					Match:  config.Match{Path: "/", Method: ""},
-					Action: "deny",
-				},
-			},
-		},
-	}
+	socketConfig := &config.SocketConfig{}
 
 	// If there's a request body, try to decode it
 	if r.Body != nil && r.ContentLength > 0 {
@@ -155,7 +145,7 @@ func (h *ManagementHandler) CreateSocketHandler(w http.ResponseWriter, r *http.R
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Apply rewrite rules if needed
 			if srv != nil {
-				if err := srv.applyRewriteRules(socketPath, r); err != nil {
+				if err := srv.applyRewriteRules(r, socketPath); err != nil {
 					log.Error("Failed to apply rewrite rules", "error", err)
 				}
 			}
@@ -313,52 +303,46 @@ func (h *ManagementHandler) handleListSockets(w http.ResponseWriter, r *http.Req
 	}
 }
 
+// DescribeSocket returns the configuration for a socket
 func (h *ManagementHandler) handleDescribeSocket(w http.ResponseWriter, r *http.Request) {
 	log := logging.GetLogger()
 
-	// Get the socket name from the query parameters
-	socketName := r.URL.Query().Get("socket")
-	if socketName == "" {
-		http.Error(w, "socket name is required", http.StatusBadRequest)
+	// Get the socket path from the query string
+	socketPath := r.URL.Query().Get("socket")
+	if socketPath == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": "socket parameter is required"}); err != nil {
+			log.Error("Failed to encode error response", "error", err)
+		}
 		return
 	}
 
-	socketPath := h.resolveSocketPath(r, socketName)
 	log.Info("Describing socket", "path", socketPath)
 
-	// Check if the socket exists in our config map
+	// Get the socket configuration
 	h.configMu.RLock()
-	config, exists := h.socketConfigs[socketPath]
+	config, ok := h.socketConfigs[socketPath]
 	h.configMu.RUnlock()
 
-	if !exists {
-		// Try to load from the file store
-		var err error
-		config, err = h.store.LoadConfig(socketPath)
-		if err != nil {
-			log.Error("Failed to load config", "error", err)
-			http.Error(w, fmt.Sprintf("socket %s not found or has no configuration", socketName), http.StatusNotFound)
+	if !ok {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": "socket not found"}); err != nil {
+			log.Error("Failed to encode error response", "error", err)
 		}
-	}
-
-	// Convert the config to YAML
-	yamlData, err := yaml.Marshal(config)
-	if err != nil {
-		log.Error("Failed to marshal config to YAML", "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	// Set the content type header
-	w.Header().Set("Content-Type", "application/yaml")
-	w.WriteHeader(http.StatusOK)
-
-	// Write the YAML data
-	_, err = w.Write(yamlData)
-	if err != nil {
-		log.Error("Failed to write YAML response", "error", err)
-		// At this point, headers have already been sent, so we can't send an HTTP error
-		// Just log the error and return
+	// Return the configuration as JSON
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(config); err != nil {
+		log.Error("Failed to encode socket configuration", "error", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		if err := json.NewEncoder(w).Encode(map[string]string{"error": "internal server error"}); err != nil {
+			log.Error("Failed to encode error response", "error", err)
+		}
 		return
 	}
 }

@@ -19,14 +19,16 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "valid config",
 			config: &SocketConfig{
-				Rules: RuleSet{
-					ACLs: []Rule{
-						{
-							Match: Match{
-								Path:   "/v1.*/containers",
-								Method: "GET",
+				Rules: []Rule{
+					{
+						Match: Match{
+							Path:   "/v1.*/containers",
+							Method: "GET",
+						},
+						Actions: []Action{
+							{
+								Action: "allow",
 							},
-							Action: "allow",
 						},
 					},
 				},
@@ -36,20 +38,22 @@ func TestValidateConfig(t *testing.T) {
 		{
 			name: "no ACL rules",
 			config: &SocketConfig{
-				Rules: RuleSet{},
+				Rules: []Rule{},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid ACL action",
 			config: &SocketConfig{
-				Rules: RuleSet{
-					ACLs: []Rule{
-						{
-							Match: Match{
-								Path: "/test",
+				Rules: []Rule{
+					{
+						Match: Match{
+							Path: "/test",
+						},
+						Actions: []Action{
+							{
+								Action: "invalid",
 							},
-							Action: "invalid",
 						},
 					},
 				},
@@ -155,28 +159,35 @@ func TestMatchValue(t *testing.T) {
 func TestLoadSocketConfig(t *testing.T) {
 	tests := []struct {
 		name    string
-		yaml    string
+		content string
 		wantErr bool
 	}{
 		{
 			name: "valid config",
-			yaml: `
-rules:
-  acls:
-    - match:
-        path: "/v1.*/containers"
-        method: "GET"
-      action: "allow"
-`,
+			content: `{
+				"rules": [
+					{
+						"match": {
+							"path": "/v1.*/containers",
+							"method": "GET"
+						},
+						"actions": [
+							{
+								"action": "allow"
+							}
+						]
+					}
+				]
+			}`,
 			wantErr: false,
 		},
 		{
-			name: "invalid yaml",
-			yaml: `
-invalid:
-  - yaml
-    format
-`,
+			name: "invalid json",
+			content: `{
+				invalid:
+				- yaml
+				format
+			}`,
 			wantErr: true,
 		},
 	}
@@ -184,14 +195,14 @@ invalid:
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create temporary file
-			tmpfile, err := os.CreateTemp("", "config-*.yaml")
+			tmpfile, err := os.CreateTemp("", "config-*.json")
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer os.Remove(tmpfile.Name())
 
-			// Write test YAML
-			if _, err := tmpfile.Write([]byte(tt.yaml)); err != nil {
+			// Write test content
+			if _, err := tmpfile.Write([]byte(tt.content)); err != nil {
 				t.Fatal(err)
 			}
 			if err := tmpfile.Close(); err != nil {
@@ -237,7 +248,11 @@ func TestValidateACLRuleWithRegex(t *testing.T) {
 				Match: Match{
 					Path: "/v1\\.[0-9]+/containers/.*",
 				},
-				Action: "allow",
+				Actions: []Action{
+					{
+						Action: "allow",
+					},
+				},
 			},
 			wantErr: false,
 		},
@@ -248,7 +263,11 @@ func TestValidateACLRuleWithRegex(t *testing.T) {
 					Path:   "/test",
 					Method: "GET|POST",
 				},
-				Action: "allow",
+				Actions: []Action{
+					{
+						Action: "allow",
+					},
+				},
 			},
 			wantErr: false,
 		},
@@ -259,7 +278,11 @@ func TestValidateACLRuleWithRegex(t *testing.T) {
 					Path:   "/v1\\.[0-9]+/(containers|networks)/.*",
 					Method: "^(GET|POST|PUT)$",
 				},
-				Action: "allow",
+				Actions: []Action{
+					{
+						Action: "allow",
+					},
+				},
 			},
 			wantErr: false,
 		},
@@ -269,7 +292,11 @@ func TestValidateACLRuleWithRegex(t *testing.T) {
 				Match: Match{
 					Path: "/test/.*",
 				},
-				Action: "deny",
+				Actions: []Action{
+					{
+						Action: "deny",
+					},
+				},
 			},
 			wantErr: true,
 		},
@@ -279,7 +306,11 @@ func TestValidateACLRuleWithRegex(t *testing.T) {
 				Match: Match{
 					Path: "/test/.*",
 				},
-				Action: "invalid",
+				Actions: []Action{
+					{
+						Action: "invalid",
+					},
+				},
 			},
 			wantErr: true,
 		},
@@ -287,7 +318,7 @@ func TestValidateACLRuleWithRegex(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateACLRule(0, tt.rule)
+			err := validateAction(0, 0, tt.rule.Actions[0])
 			if (err != nil) != tt.wantErr {
 				t.Errorf("validateACLRule() error = %v, wantErr %v", err, tt.wantErr)
 			}

@@ -19,7 +19,7 @@ import (
 
 func TestRunCreate(t *testing.T) {
 	// Create a temporary directory for the test socket
-	tmpDir, err := os.MkdirTemp("", "docker-proxy-test-*")
+	tmpDir, err := os.MkdirTemp("/tmp", "docker-proxy-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestRunCreate(t *testing.T) {
 
 func TestRunDelete(t *testing.T) {
 	// Create a temporary directory for the test socket
-	tmpDir, err := os.MkdirTemp("", "docker-proxy-test-*")
+	tmpDir, err := os.MkdirTemp("/tmp", "docker-proxy-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestRunDelete(t *testing.T) {
 
 func TestRunList(t *testing.T) {
 	// Create a temporary directory for the test socket
-	tmpDir, err := os.MkdirTemp("", "docker-proxy-test-*")
+	tmpDir, err := os.MkdirTemp("/tmp", "docker-proxy-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestRunList(t *testing.T) {
 
 func TestRunDescribe(t *testing.T) {
 	// Create a temporary directory for the test socket
-	tmpDir, err := os.MkdirTemp("", "docker-proxy-test-*")
+	tmpDir, err := os.MkdirTemp("/tmp", "docker-proxy-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +260,7 @@ func TestRunDescribe(t *testing.T) {
 
 func TestRunClean(t *testing.T) {
 	// Create a temporary directory for the test socket
-	tmpDir, err := os.MkdirTemp("", "docker-proxy-test-*")
+	tmpDir, err := os.MkdirTemp("/tmp", "docker-proxy-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}

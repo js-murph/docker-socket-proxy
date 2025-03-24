@@ -23,7 +23,7 @@ func TestNewSocketPaths(t *testing.T) {
 
 func TestSocketPathsWithCustomPaths(t *testing.T) {
 	// Create temporary directory for test sockets
-	tmpDir, err := os.MkdirTemp("", "socket-test-*")
+	tmpDir, err := os.MkdirTemp("/tmp", "socket-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}

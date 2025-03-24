@@ -11,22 +11,12 @@ config:
   propagate_socket: "/var/run/docker.sock"
 
 rules:
-  acls:
-    - match:
-        path: "/v1.*/containers/json"
-        method: "GET"
-      action: "allow"
-      reason: "Allow listing containers"
-  
-  rewrites:
-    - match:
-        path: "/v1.*/containers/create"
-        method: "POST"
-      actions:
-        - action: "upsert"
-          update:
-            Env:
-              - "SECURE=true"
+  - match:
+      path: "/v1.*/volumes"
+      method: "GET"
+    actions:
+      - action: "deny"
+        reason: "Listing volumes is restricted"
 ```
 
 ## Config Section
@@ -35,56 +25,13 @@ The `config` section contains global settings for the proxy socket:
 
 | Option | Description | Required | Default |
 |--------|-------------|----------|---------|
-| `propagate_socket` | Path to the Docker socket to proxy | Yes | - |
+| `propagate_socket` | Path to the Docker socket to proxy | No | - |
 
 ## Rules Section
 
-The `rules` section is divided into two subsections:
+The `rules` section is contains a list of rules that impose modifications or restrictions on the requests to the Docker socket. Each rule is processed sequentially and has a `match` section and an `actions` section.
 
-1. `acls`: Access control rules that determine whether requests are allowed or denied
-2. `rewrites`: Rules for modifying request content before it's sent to Docker
-
-### ACLs
-
-The `acls` section contains a list of rules that control access to Docker API endpoints. Each rule consists of:
-
-1. A `match` section that determines when the rule applies
-2. An `action` field that specifies whether to allow or deny the request
-3. An optional `reason` field for documentation
-
-ACL rules are processed in order, and the first matching rule determines whether the request is allowed or denied.
-
-Example ACL rule:
-
-```yaml
-acls:
-  - match:
-      path: "/v1.*/containers/json"
-      method: "GET"
-    action: "allow"
-    reason: "Allow listing containers"
-```
-
-### Rewrites
-
-The `rewrites` section contains rules for modifying request content before it's sent to Docker. Each rewrite rule consists of:
-
-1. A `match` section that determines when the rule applies
-2. An `actions` section that defines how to modify the request
-
-Example rewrite rule:
-
-```yaml
-rewrites:
-  - match:
-      path: "/v1.*/containers/create"
-      method: "POST"
-    actions:
-      - action: "upsert"
-        update:
-          Env:
-            - "SECURE=true"
-```
+The match section is used to determine if the rule should be applied to the request. The actions section is used to modify the request or respond to the request. Each action in a rule is processed sequentially and the order of the actions is important.
 
 ### Match Criteria
 
@@ -109,31 +56,26 @@ match:
       - "DEBUG=true"
 ```
 
-### ACL Actions
+All match fields will attempt to match the entire string first and then attempt regex matching. The matching is done against the payload of the docker API request, so for available fields for matching see the [Docker API documentation](https://docs.docker.com/engine/api/).
 
-ACL rules support two actions:
+### Actions
+
+Below is a list of the currently supported actions:
 
 | Action | Description |
 |--------|-------------|
-| `allow` | Allow the request to proceed |
-| `deny` | Deny the request and return an error |
+| `allow` | Stop processing the rule list and immediately allow the request to proceed |
+| `deny` | Stop processing the rule list and immediately deny the request and return an error |
+| `upsert` | Add or replace fields in the request |
+| `replace` | Replace matching fields in the request |
+| `delete` | Delete matching fields from the request |
 
-For both actions, you can provide a `reason` field for documentation:
+For the `allow` and `deny` actions, you can provide a `reason` field for documentation:
 
 ```yaml
 action: "deny"
 reason: "Privileged containers are not allowed"
 ```
-
-### Rewrite Actions
-
-Rewrite rules support three types of actions:
-
-| Action | Description |
-|--------|-------------|
-| `upsert` | Add or update fields in the request |
-| `replace` | Replace matching fields in the request |
-| `delete` | Delete matching fields from the request |
 
 #### Upsert Action
 
@@ -183,55 +125,56 @@ config:
   propagate_socket: "/var/run/docker.sock"
 
 rules:
-  acls:
-    - match:
-        path: "/v1.*/volumes"
-        method: "GET"
-      action: "deny"
-      reason: "Listing volumes is restricted"
+  - match:
+      path: "/v1.*/volumes"
+      method: "GET"
+    actions:
+      - action: "deny"
+        reason: "Listing volumes is restricted"
 
-    - match:
-        path: "/v1.*/containers/create"
-        method: "POST"
+  - match:
+      path: "/v1.*/containers/create"
+      method: "POST"
+      contains:
+        Env:
+          - "BLOCK=true"
+    actions:
+      - action: "deny"
+        reason: "Blocked creation of containers with restricted env variables"
+
+  - match:
+      path: "/v1.*/containers/create"
+      method: "POST"
+    actions:
+      - action: "upsert"
+        update:
+          Env:
+            - "FUN=yes"
+      - action: "replace"
         contains:
           Env:
-            - "BLOCK=true"
-      action: "deny"
-      reason: "Blocked creation of containers with restricted env variables"
+            - "DEBUG=true"
+        update:
+          Env:
+            - "DEBUG=false"
+      - action: "replace"
+        contains:
+          HostConfig:
+            Privileged: true
+        update:
+          HostConfig:
+            Privileged: false
+      - action: "delete"
+        contains:
+          Env:
+            - "PANTS=.*"
 
-    - match:
-        path: "/.*"
-        method: ".*"
-      action: "allow"
-      reason: "Allow all other requests, the default is to block everything"
-
-  rewrites:
-    - match:
-        path: "/v1.*/containers/create"
-        method: "POST"
-      actions:
-        - action: "upsert"
-          update:
-            Env:
-              - "FUN=yes"
-        - action: "replace"
-          contains:
-            Env:
-              - "DEBUG=true"
-          update:
-            Env:
-              - "DEBUG=false"
-        - action: "replace"
-          contains:
-            HostConfig:
-              Privileged: true
-          update:
-            HostConfig:
-              Privileged: false
-        - action: "delete"
-          contains:
-            Env:
-              - "PANTS=.*"
+  - match:
+      path: "/.*"
+      method: ".*"
+    actions:
+      - action: "deny"
+        reason: "Deny all other requests, the default is to allow everything"
 ```
 
 For more detailed information about rules, see the [Rules](rules.md) page.

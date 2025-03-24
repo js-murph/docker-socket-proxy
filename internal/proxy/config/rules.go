@@ -1,164 +1,58 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
+	"strings"
 
 	"docker-socket-proxy/internal/logging"
-
-	"gopkg.in/yaml.v3"
 )
 
+// SocketConfig represents the socket configuration
 type SocketConfig struct {
 	Config ConfigSet `json:"config" yaml:"config"`
-	Rules  RuleSet   `json:"rules" yaml:"rules"`
+	Rules  []Rule    `json:"rules" yaml:"rules"`
 }
 
 type ConfigSet struct {
 	PropagateSocket string `json:"propagate_socket" yaml:"propagate_socket"`
 }
 
-type RuleSet struct {
-	ACLs     []Rule        `json:"acls" yaml:"acls"`
-	Rewrites []RewriteRule `json:"rewrites" yaml:"rewrites"`
+// Rule represents a rule in the new format
+type Rule struct {
+	Match   Match    `json:"match" yaml:"match"`
+	Actions []Action `json:"actions" yaml:"actions"`
 }
 
-type RewriteRule struct {
-	Match   Match           `json:"match" yaml:"match"`
-	Actions []RewriteAction `json:"actions" yaml:"actions"`
+// Match represents a match criteria
+type Match struct {
+	Path     string                 `json:"path" yaml:"path"`
+	Method   string                 `json:"method" yaml:"method"`
+	Contains map[string]interface{} `json:"contains,omitempty" yaml:"contains,omitempty"`
 }
 
-type RewriteAction struct {
+// Action represents an action to take
+type Action struct {
 	Action   string                 `json:"action" yaml:"action"`
+	Reason   string                 `json:"reason,omitempty" yaml:"reason,omitempty"`
 	Contains map[string]interface{} `json:"contains,omitempty" yaml:"contains,omitempty"`
 	Update   map[string]interface{} `json:"update,omitempty" yaml:"update,omitempty"`
 }
 
-type Pattern struct {
-	Match  interface{} `json:"match,omitempty" yaml:"match,omitempty"` // Optional match value for updates
-	Value  interface{} `json:"value,omitempty" yaml:"value,omitempty"` // The value to set/update
-	Action string      `json:"action" yaml:"action"`                   // "replace" (default), "upsert", or "delete"
-}
-
-type Rule struct {
-	Match  Match  `json:"match" yaml:"match"`
-	Action string `json:"action" yaml:"action"`
-	Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
-}
-
-type Match struct {
-	Path     string                 `json:"path,omitempty" yaml:"path,omitempty"`
-	Method   string                 `json:"method,omitempty" yaml:"method,omitempty"`
-	Contains map[string]interface{} `json:"contains,omitempty" yaml:"contains,omitempty"`
-}
-
-// ValidateConfig validates the socket configuration
-func ValidateConfig(config *SocketConfig) error {
-	if config == nil {
-		return fmt.Errorf("configuration cannot be nil")
-	}
-
-	// Validate ACLs
-	if len(config.Rules.ACLs) == 0 {
-		return fmt.Errorf("at least one ACL rule must be defined")
-	}
-
-	// Validate ACL rules
-	for i, rule := range config.Rules.ACLs {
-		if err := validateACLRule(i, rule); err != nil {
-			return err
-		}
-	}
-
-	// Validate rewrite rules
-	for i, rule := range config.Rules.Rewrites {
-		if err := validateRewriteRule(i, rule); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func validateACLRule(i int, rule Rule) error {
-	// Validate action
-	if rule.Action != "allow" && rule.Action != "deny" {
-		return fmt.Errorf("rule %d: action must be either 'allow' or 'deny', got '%s'", i, rule.Action)
-	}
-
-	// Validate match criteria
-	if rule.Match.Path == "" && rule.Match.Method == "" && len(rule.Match.Contains) == 0 {
-		return fmt.Errorf("rule %d: at least one match criteria (path, method, or contains) must be specified", i)
-	}
-
-	// Require reason for deny rules
-	if rule.Action == "deny" && rule.Reason == "" {
-		return fmt.Errorf("rule %d: deny rules must specify a reason", i)
-	}
-
-	return nil
-}
-
-func validateRewriteRule(i int, rule RewriteRule) error {
-	// Validate match criteria
-	if rule.Match.Path == "" && rule.Match.Method == "" && len(rule.Match.Contains) == 0 {
-		return fmt.Errorf("rewrite rule %d: at least one match criteria (path, method, or contains) must be specified", i)
-	}
-
-	// Validate patterns
-	if len(rule.Actions) == 0 {
-		return fmt.Errorf("rewrite rule %d: at least one pattern must be specified", i)
-	}
-
-	for j, pattern := range rule.Actions {
-		if err := validateRewriteAction(i, j, pattern); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// validateRewriteAction validates a rewrite action
-func validateRewriteAction(ruleIndex, actionIndex int, action RewriteAction) error {
-	// Validate action type
-	if action.Action != "replace" && action.Action != "upsert" && action.Action != "delete" {
-		return fmt.Errorf("invalid action for rewrite rule %d, action %d: %s (must be 'replace', 'upsert', or 'delete')",
-			ruleIndex, actionIndex, action.Action)
-	}
-
-	// For delete, match must be specified
-	if action.Action == "delete" && len(action.Contains) == 0 {
-		return fmt.Errorf("rewrite rule %d, action %d: delete action must specify match criteria",
-			ruleIndex, actionIndex)
-	}
-
-	// For replace, both match and update must be specified
-	if action.Action == "replace" && (len(action.Contains) == 0 || len(action.Update) == 0) {
-		return fmt.Errorf("rewrite rule %d, action %d: replace action must specify both match and update",
-			ruleIndex, actionIndex)
-	}
-
-	// For upsert, update must be specified
-	if action.Action == "upsert" && len(action.Update) == 0 {
-		return fmt.Errorf("rewrite rule %d, action %d: upsert action must specify update",
-			ruleIndex, actionIndex)
-	}
-
-	return nil
-}
-
-func LoadSocketConfig(path string) (*SocketConfig, error) {
-	data, err := os.ReadFile(path)
+// LoadSocketConfig loads a socket configuration from a file
+func LoadSocketConfig(configPath string) (*SocketConfig, error) {
+	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading config file: %w", err)
 	}
 
 	var config SocketConfig
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("parsing YAML: %w", err)
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("failed to parse JSON config file: %w", err)
 	}
 
 	if err := ValidateConfig(&config); err != nil {
@@ -166,6 +60,207 @@ func LoadSocketConfig(path string) (*SocketConfig, error) {
 	}
 
 	return &config, nil
+}
+
+// ValidateConfig validates the socket configuration
+func ValidateConfig(config *SocketConfig) error {
+	if config == nil {
+		return fmt.Errorf("config is nil")
+	}
+
+	// Validate rules
+	if len(config.Rules) == 0 {
+		return fmt.Errorf("at least one rule is required")
+	}
+
+	// Validate each rule
+	for i, rule := range config.Rules {
+		if err := validateRule(i, rule); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// validateRule validates a rule
+func validateRule(index int, rule Rule) error {
+	// Validate match
+	if rule.Match.Path == "" {
+		return fmt.Errorf("rule %d: path is required", index)
+	}
+
+	// Validate actions
+	if len(rule.Actions) == 0 {
+		return fmt.Errorf("rule %d: at least one action is required", index)
+	}
+
+	// Validate each action
+	for i, action := range rule.Actions {
+		if err := validateAction(index, i, action); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// validateAction validates an action
+func validateAction(ruleIndex, actionIndex int, action Action) error {
+	// Validate action type
+	switch action.Action {
+	case "allow":
+		// Allow actions are always valid
+	case "deny":
+		// Deny actions require a reason
+		if action.Reason == "" {
+			return fmt.Errorf("rule %d, action %d: deny action requires a reason", ruleIndex, actionIndex)
+		}
+	case "upsert", "replace", "delete":
+		// Rewrite actions require contains and/or update fields
+		if action.Action != "delete" && len(action.Update) == 0 {
+			return fmt.Errorf("rule %d, action %d: %s action requires update field",
+				ruleIndex, actionIndex, action.Action)
+		}
+		if len(action.Contains) == 0 && action.Action != "upsert" {
+			return fmt.Errorf("rule %d, action %d: %s action requires contains field",
+				ruleIndex, actionIndex, action.Action)
+		}
+	default:
+		return fmt.Errorf("rule %d, action %d: invalid action: %s", ruleIndex, actionIndex, action.Action)
+	}
+
+	return nil
+}
+
+// MatchValue checks if a value matches an expected value
+func MatchValue(expected, actual interface{}) bool {
+	// Handle nil values
+	if expected == nil && actual == nil {
+		return true
+	}
+	if expected == nil || actual == nil {
+		return false
+	}
+
+	// Handle different types
+	switch exp := expected.(type) {
+	case string:
+		// String matching
+		switch act := actual.(type) {
+		case string:
+			// If it looks like a regex, use regex matching
+			if isRegexPattern(exp) {
+				return matchRegex(exp, act)
+			}
+			// Otherwise, use exact matching
+			return exp == act
+		case []interface{}:
+			// Check if any array element matches the string
+			for _, item := range act {
+				if str, ok := item.(string); ok {
+					// If it looks like a regex, use regex matching
+					if isRegexPattern(exp) {
+						if matchRegex(exp, str) {
+							return true
+						}
+					} else {
+						// Otherwise, use exact matching
+						if exp == str {
+							return true
+						}
+					}
+				}
+			}
+			return false
+		default:
+			return false
+		}
+	case []interface{}:
+		// Array matching
+		switch act := actual.(type) {
+		case []interface{}:
+			// Check if ALL items in expected are in actual
+			for _, expItem := range exp {
+				found := false
+				expStr, isExpStr := expItem.(string)
+
+				for _, actItem := range act {
+					actStr, isActStr := actItem.(string)
+
+					if isExpStr && isActStr {
+						// If it looks like a regex, use regex matching
+						if isRegexPattern(expStr) {
+							if matchRegex(expStr, actStr) {
+								found = true
+								break
+							}
+						} else {
+							// Otherwise, use exact matching
+							if expStr == actStr {
+								found = true
+								break
+							}
+						}
+					} else if reflect.DeepEqual(expItem, actItem) {
+						found = true
+						break
+					}
+				}
+
+				if !found {
+					return false // If any expected item is not found, return false
+				}
+			}
+			return true // All expected items were found
+		default:
+			return false
+		}
+	case map[string]interface{}:
+		// Map matching
+		actMap, ok := actual.(map[string]interface{})
+		if !ok {
+			return false
+		}
+
+		// Check if ALL keys in expected are in actual with matching values
+		for key, expValue := range exp {
+			actValue, exists := actMap[key]
+			if !exists || !MatchValue(expValue, actValue) {
+				return false
+			}
+		}
+		return true
+	default:
+		// For other types, use direct equality
+		return reflect.DeepEqual(expected, actual)
+	}
+}
+
+// Helper function to check if a string is a regex pattern
+func isRegexPattern(s string) bool {
+	// These characters are definitely regex metacharacters when not escaped
+	metaChars := []string{".", "*", "+", "?", "^", "$", "(", ")", "[", "]", "{", "}", "|"}
+
+	// Simple check: if it contains any metacharacters, treat it as a regex
+	for _, char := range metaChars {
+		if strings.Contains(s, char) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// Helper function to match a regex pattern against a string
+func matchRegex(pattern, s string) bool {
+	// Try to compile and use the pattern as a regex
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		// If compilation fails, fall back to exact match
+		return pattern == s
+	}
+	return re.MatchString(s)
 }
 
 // MatchPattern uses filepath.Match for wildcard pattern matching
@@ -178,47 +273,8 @@ func MatchPattern(pattern, value string) bool {
 	return matched
 }
 
-// MatchValue handles pattern matching for different types
-func MatchValue(pattern interface{}, value interface{}) bool {
-	switch p := pattern.(type) {
-	case string:
-		v, ok := value.(string)
-		if !ok {
-			return false
-		}
-		return MatchPattern(p, v)
-
-	case []interface{}:
-		v, ok := value.([]interface{})
-		if !ok {
-			return false
-		}
-		// For arrays, check if any pattern matches any value
-		for _, pItem := range p {
-			pStr, ok := pItem.(string)
-			if !ok {
-				continue
-			}
-			for _, vItem := range v {
-				vStr, ok := vItem.(string)
-				if !ok {
-					continue
-				}
-				if MatchPattern(pStr, vStr) {
-					return true
-				}
-			}
-		}
-		return false
-
-	default:
-		// For non-string/array types, use exact matching
-		return reflect.DeepEqual(pattern, value)
-	}
-}
-
-// GetPropagationRules returns rewrite rules for socket propagation if enabled
-func (c *SocketConfig) GetPropagationRules() []RewriteRule {
+// GetPropagationRules returns rules for socket propagation if enabled
+func (c *SocketConfig) GetPropagationRules() []Rule {
 	if c.Config.PropagateSocket == "" {
 		return nil
 	}
@@ -227,13 +283,13 @@ func (c *SocketConfig) GetPropagationRules() []RewriteRule {
 	log.Debug("Creating propagation rules",
 		"socket", c.Config.PropagateSocket)
 
-	return []RewriteRule{
+	return []Rule{
 		{
 			Match: Match{
 				Path:   "/v1.*/containers/create",
 				Method: "POST",
 			},
-			Actions: []RewriteAction{
+			Actions: []Action{
 				{
 					Action: "upsert",
 					Update: map[string]interface{}{
