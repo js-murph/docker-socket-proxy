@@ -435,12 +435,8 @@ func TestManagementHandler_DescribeSocket(t *testing.T) {
 	// Create a file store
 	store := storage.NewFileStore(tmpDir)
 
-	// Create a management handler
-	handler := &ManagementHandler{
-		socketConfigs: socketConfigs,
-		configMu:      &configMu,
-		store:         store,
-	}
+	// Create a management handler using the constructor
+	handler := NewManagementHandler("/tmp/docker.sock", socketConfigs, &configMu, store)
 
 	// Test cases
 	tests := []struct {
