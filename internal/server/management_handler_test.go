@@ -585,11 +585,6 @@ func TestManagementHandler_ResolveSocketPath(t *testing.T) {
 			if tt.withServer {
 				ctx := context.WithValue(req.Context(), serverContextKey, srv)
 				req = req.WithContext(ctx)
-			} else {
-				// Reset environment variable for test
-				oldEnv := os.Getenv("DOCKER_PROXY_SOCKET_DIR")
-				os.Setenv("DOCKER_PROXY_SOCKET_DIR", "")
-				defer os.Setenv("DOCKER_PROXY_SOCKET_DIR", oldEnv)
 			}
 
 			got := handler.resolveSocketPath(req, tt.socketName)
@@ -598,22 +593,6 @@ func TestManagementHandler_ResolveSocketPath(t *testing.T) {
 			}
 		})
 	}
-
-	// Test with custom environment variable
-	t.Run("with custom environment variable", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/", nil)
-
-		// Set custom environment variable
-		oldEnv := os.Getenv("DOCKER_PROXY_SOCKET_DIR")
-		os.Setenv("DOCKER_PROXY_SOCKET_DIR", "/custom/path")
-		defer os.Setenv("DOCKER_PROXY_SOCKET_DIR", oldEnv)
-
-		got := handler.resolveSocketPath(req, "test.sock")
-		want := "/custom/path/test.sock"
-		if got != want {
-			t.Errorf("resolveSocketPath() = %v, want %v", got, want)
-		}
-	})
 }
 
 func TestManagementHandler_ValidateAndDecodeConfig(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"docker-socket-proxy/internal/logging"
+	"docker-socket-proxy/internal/management"
 	"docker-socket-proxy/internal/proxy/config"
 	"docker-socket-proxy/internal/storage"
 
@@ -372,11 +373,7 @@ func (h *ManagementHandler) resolveSocketPath(r *http.Request, socketName string
 	}
 
 	// Try to get the default socket directory
-	socketDir := "/var/run/docker-proxy"
-	if envDir := os.Getenv("DOCKER_PROXY_SOCKET_DIR"); envDir != "" {
-		socketDir = envDir
-	}
-	return filepath.Join(socketDir, socketName)
+	return filepath.Join(management.DefaultSocketDir, socketName)
 }
 
 // cleanSockets removes all sockets
