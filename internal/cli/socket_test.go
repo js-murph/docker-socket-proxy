@@ -279,8 +279,8 @@ func TestRunClean(t *testing.T) {
 		if r.Method != "DELETE" {
 			t.Errorf("Expected DELETE request, got %s", r.Method)
 		}
-		if r.URL.Path != "/sockets" {
-			t.Errorf("Expected /sockets path, got %s", r.URL.Path)
+		if r.URL.Path != "/socket/clean" {
+			t.Errorf("Expected /socket/clean path, got %s", r.URL.Path)
 		}
 
 		_, err := w.Write([]byte("All sockets have been removed successfully"))
@@ -288,10 +288,12 @@ func TestRunClean(t *testing.T) {
 			t.Errorf("Failed to write response: %v", err)
 		}
 	}))
+
 	server.Listener = l
 	server.Start()
 	defer server.Close()
 
+	cmd := &cobra.Command{}
 	// Set up paths
 	paths := &management.SocketPaths{
 		Management: socketPath,
@@ -299,7 +301,7 @@ func TestRunClean(t *testing.T) {
 
 	// Capture stdout
 	output := captureOutput(func() {
-		RunClean(paths)
+		RunClean(cmd, paths)
 	})
 
 	// Check output

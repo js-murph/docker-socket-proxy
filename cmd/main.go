@@ -89,7 +89,7 @@ func main() {
 		Use:   "clean",
 		Short: "Remove all proxy sockets",
 		Run: func(cmd *cobra.Command, args []string) {
-			cli.RunClean(paths)
+			cli.RunClean(cmd, paths)
 		},
 	}
 
