@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"docker-socket-proxy/internal/logging"
+	"docker-socket-proxy/internal/management"
 	"docker-socket-proxy/internal/proxy/config"
 	"docker-socket-proxy/internal/storage"
 
@@ -25,17 +26,75 @@ type ManagementHandler struct {
 	servers       map[string]*http.Server
 	serverMu      sync.RWMutex
 	store         *storage.FileStore
+	mux           *http.ServeMux
 }
 
 func NewManagementHandler(dockerSocket string, configs map[string]*config.SocketConfig, mu *sync.RWMutex, store *storage.FileStore) *ManagementHandler {
-	return &ManagementHandler{
+	// Create the handler first
+	h := &ManagementHandler{
 		dockerSocket:  dockerSocket,
 		socketConfigs: configs,
 		configMu:      mu,
 		proxyHandler:  NewProxyHandler(dockerSocket, configs, mu),
 		servers:       make(map[string]*http.Server),
 		store:         store,
+		mux:           http.NewServeMux(), // Initialize mux immediately
 	}
+
+	h.mux.HandleFunc("/socket/create", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		h.CreateSocketHandler(w, r)
+	})
+
+	h.mux.HandleFunc("/socket/list", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		h.handleListSockets(w, r)
+	})
+
+	h.mux.HandleFunc("/socket/describe", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		h.handleDescribeSocket(w, r)
+	})
+
+	h.mux.HandleFunc("/socket/delete", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Check if socket parameter is provided
+		socketName := r.URL.Query().Get("socket")
+		if socketName == "" {
+			socketName = r.Header.Get("Socket-Path")
+		}
+
+		if socketName == "" {
+			http.Error(w, "Socket parameter is required", http.StatusBadRequest)
+			return
+		}
+
+		h.handleDeleteSocket(w, r)
+	})
+
+	h.mux.HandleFunc("/socket/clean", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		h.cleanSockets(w, r)
+	})
+
+	return h
 }
 
 // ServeHTTP handles HTTP requests to the management server
@@ -44,26 +103,14 @@ func (h *ManagementHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Debug("Management request received", "method", r.Method, "path", r.URL.Path)
 
 	// Log the request
-	log.Info("Management request",
-		"method", r.Method,
-		"path", r.URL.Path,
-	)
+	log.Info("Management request", "method", r.Method, "path", r.URL.Path)
 
-	// Handle the request based on the path
-	switch {
-	case r.Method == "POST" && (r.URL.Path == "/socket" || r.URL.Path == "/create-socket"):
-		h.CreateSocketHandler(w, r)
-	case r.Method == "GET" && (r.URL.Path == "/socket" || r.URL.Path == "/list-sockets"):
-		h.handleListSockets(w, r)
-	case r.Method == "GET" && (strings.HasPrefix(r.URL.Path, "/socket/") || r.URL.Path == "/describe-socket"):
-		h.handleDescribeSocket(w, r)
-	case r.Method == "DELETE" && (strings.HasPrefix(r.URL.Path, "/socket/") || r.URL.Path == "/delete-socket"):
-		h.handleDeleteSocket(w, r)
-	case r.Method == "DELETE" && r.URL.Path == "/sockets":
-		h.cleanSockets(w, r)
-	default:
-		log.Error("Unknown request", "method", r.Method, "path", r.URL.Path)
-		http.Error(w, "Not found", http.StatusNotFound)
+	// Let the mux handle the request
+	if h.mux != nil {
+		h.mux.ServeHTTP(w, r)
+	} else {
+		log.Error("Mux is nil, cannot handle request")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 	}
 }
 
@@ -183,6 +230,7 @@ func (h *ManagementHandler) CreateSocketHandler(w http.ResponseWriter, r *http.R
 	}
 }
 
+// handleDeleteSocket handles the deletion of a socket
 func (h *ManagementHandler) handleDeleteSocket(w http.ResponseWriter, r *http.Request) {
 	log := logging.GetLogger()
 
@@ -303,7 +351,7 @@ func (h *ManagementHandler) handleListSockets(w http.ResponseWriter, r *http.Req
 	}
 }
 
-// DescribeSocket returns the configuration for a socket
+// handleDescribeSocket returns the configuration for a socket
 func (h *ManagementHandler) handleDescribeSocket(w http.ResponseWriter, r *http.Request) {
 	log := logging.GetLogger()
 
@@ -372,11 +420,7 @@ func (h *ManagementHandler) resolveSocketPath(r *http.Request, socketName string
 	}
 
 	// Try to get the default socket directory
-	socketDir := "/var/run/docker-proxy"
-	if envDir := os.Getenv("DOCKER_PROXY_SOCKET_DIR"); envDir != "" {
-		socketDir = envDir
-	}
-	return filepath.Join(socketDir, socketName)
+	return filepath.Join(management.DefaultSocketDir, socketName)
 }
 
 // cleanSockets removes all sockets

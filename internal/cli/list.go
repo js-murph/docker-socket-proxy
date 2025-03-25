@@ -13,7 +13,7 @@ func RunList(paths *management.SocketPaths) {
 	client := createClient(paths.Management)
 
 	// Create the list request
-	req, err := http.NewRequest("GET", "http://localhost/list-sockets", nil)
+	req, err := http.NewRequest("GET", "http://localhost/socket/list", nil)
 	if err != nil {
 		exitWithError("Error creating request: %v", err)
 	}

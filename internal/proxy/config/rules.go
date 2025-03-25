@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"docker-socket-proxy/internal/logging"
+
+	"gopkg.in/yaml.v3"
 )
 
 // SocketConfig represents the socket configuration
@@ -51,8 +53,20 @@ func LoadSocketConfig(configPath string) (*SocketConfig, error) {
 	}
 
 	var config SocketConfig
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("failed to parse JSON config file: %w", err)
+
+	// Determine if the file is YAML or JSON based on extension
+	if strings.HasSuffix(configPath, ".yaml") || strings.HasSuffix(configPath, ".yml") {
+		// Parse YAML
+		if err := yaml.Unmarshal(data, &config); err != nil {
+			return nil, fmt.Errorf("failed to parse YAML config file: %w", err)
+		}
+	} else if strings.HasSuffix(configPath, ".json") {
+		// Assume it's JSON
+		if err := json.Unmarshal(data, &config); err != nil {
+			return nil, fmt.Errorf("failed to parse JSON config file: %w", err)
+		}
+	} else {
+		return nil, fmt.Errorf("unsupported config file extension: %s", filepath.Ext(configPath))
 	}
 
 	if err := ValidateConfig(&config); err != nil {

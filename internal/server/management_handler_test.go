@@ -62,7 +62,7 @@ func TestManagementHandler_CreateSocket(t *testing.T) {
 		}
 
 		// Create a request to create a socket
-		req, err := http.NewRequest("POST", ts.URL+"/socket", bytes.NewBuffer(configJSON))
+		req, err := http.NewRequest("POST", ts.URL+"/socket/create", bytes.NewBuffer(configJSON))
 		if err != nil {
 			t.Fatalf("Failed to create request: %v", err)
 		}
@@ -130,7 +130,7 @@ func TestManagementHandler_CreateSocket(t *testing.T) {
 		}
 
 		// Create a request to create a socket
-		req, err := http.NewRequest("POST", ts.URL+"/socket", bytes.NewBuffer(configJSON))
+		req, err := http.NewRequest("POST", ts.URL+"/socket/create", bytes.NewBuffer(configJSON))
 		if err != nil {
 			t.Fatalf("Failed to create request: %v", err)
 		}
@@ -262,7 +262,7 @@ func TestManagementHandler_DeleteSocket(t *testing.T) {
 				}
 			}
 
-			req := httptest.NewRequest("DELETE", "/socket/"+tt.socketName, nil)
+			req := httptest.NewRequest("DELETE", "/socket/delete?socket="+tt.socketName, nil)
 
 			// Add socket name as query param or header
 			if tt.socketName != "" {
@@ -339,7 +339,7 @@ func TestManagementHandler_ListSockets(t *testing.T) {
 
 	// Test with server context
 	t.Run("with server context", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/list-sockets", nil)
+		req := httptest.NewRequest("GET", "/socket/list", nil)
 		ctx := context.WithValue(req.Context(), serverContextKey, srv)
 		req = req.WithContext(ctx)
 
@@ -377,7 +377,7 @@ func TestManagementHandler_ListSockets(t *testing.T) {
 
 	// Test without server context
 	t.Run("without server context", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/list-sockets", nil)
+		req := httptest.NewRequest("GET", "/socket/list", nil)
 		w := httptest.NewRecorder()
 
 		handler.ServeHTTP(w, req)
@@ -435,12 +435,8 @@ func TestManagementHandler_DescribeSocket(t *testing.T) {
 	// Create a file store
 	store := storage.NewFileStore(tmpDir)
 
-	// Create a management handler
-	handler := &ManagementHandler{
-		socketConfigs: socketConfigs,
-		configMu:      &configMu,
-		store:         store,
-	}
+	// Create a management handler using the constructor
+	handler := NewManagementHandler("/tmp/docker.sock", socketConfigs, &configMu, store)
 
 	// Test cases
 	tests := []struct {
@@ -495,9 +491,9 @@ func TestManagementHandler_DescribeSocket(t *testing.T) {
 			// Create a request with the appropriate socket path
 			var req *http.Request
 			if tt.socketPath == "" {
-				req, _ = http.NewRequest("GET", "/describe-socket", nil)
+				req, _ = http.NewRequest("GET", "/socket/describe", nil)
 			} else {
-				req, _ = http.NewRequest("GET", "/describe-socket?socket="+url.QueryEscape(tt.socketPath), nil)
+				req, _ = http.NewRequest("GET", "/socket/describe?socket="+url.QueryEscape(tt.socketPath), nil)
 			}
 
 			// Create a response recorder
@@ -585,11 +581,6 @@ func TestManagementHandler_ResolveSocketPath(t *testing.T) {
 			if tt.withServer {
 				ctx := context.WithValue(req.Context(), serverContextKey, srv)
 				req = req.WithContext(ctx)
-			} else {
-				// Reset environment variable for test
-				oldEnv := os.Getenv("DOCKER_PROXY_SOCKET_DIR")
-				os.Setenv("DOCKER_PROXY_SOCKET_DIR", "")
-				defer os.Setenv("DOCKER_PROXY_SOCKET_DIR", oldEnv)
 			}
 
 			got := handler.resolveSocketPath(req, tt.socketName)
@@ -598,22 +589,6 @@ func TestManagementHandler_ResolveSocketPath(t *testing.T) {
 			}
 		})
 	}
-
-	// Test with custom environment variable
-	t.Run("with custom environment variable", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/", nil)
-
-		// Set custom environment variable
-		oldEnv := os.Getenv("DOCKER_PROXY_SOCKET_DIR")
-		os.Setenv("DOCKER_PROXY_SOCKET_DIR", "/custom/path")
-		defer os.Setenv("DOCKER_PROXY_SOCKET_DIR", oldEnv)
-
-		got := handler.resolveSocketPath(req, "test.sock")
-		want := "/custom/path/test.sock"
-		if got != want {
-			t.Errorf("resolveSocketPath() = %v, want %v", got, want)
-		}
-	})
 }
 
 func TestManagementHandler_ValidateAndDecodeConfig(t *testing.T) {
@@ -643,7 +618,7 @@ func TestManagementHandler_ValidateAndDecodeConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest("POST", "/create-socket", strings.NewReader(tt.body))
+			req := httptest.NewRequest("POST", "/socket/create", strings.NewReader(tt.body))
 			if tt.body != "" {
 				req.Header.Set("Content-Type", "application/json")
 			}
@@ -697,7 +672,7 @@ func TestManagementHandler(t *testing.T) {
 		{
 			name:       "create socket",
 			method:     "POST",
-			path:       "/create-socket",
+			path:       "/socket/create",
 			body:       strings.NewReader(`{"rules":[{"match":{"path":"/test","method":"GET"},"actions":[{"action":"allow"}]}]}`),
 			headers:    map[string]string{"Content-Type": "application/json"},
 			withServer: true,
@@ -706,14 +681,14 @@ func TestManagementHandler(t *testing.T) {
 		{
 			name:       "list sockets",
 			method:     "GET",
-			path:       "/list-sockets",
+			path:       "/socket/list",
 			withServer: true,
 			wantStatus: http.StatusOK,
 		},
 		{
 			name:       "delete socket",
 			method:     "DELETE",
-			path:       "/delete-socket",
+			path:       "/socket/delete",
 			headers:    map[string]string{"Socket-Path": filepath.Join(tmpDir, "test.sock")},
 			withServer: true,
 			wantStatus: http.StatusOK,
@@ -721,7 +696,7 @@ func TestManagementHandler(t *testing.T) {
 		{
 			name:       "describe socket",
 			method:     "GET",
-			path:       "/describe-socket",
+			path:       "/socket/describe",
 			headers:    map[string]string{},
 			withServer: true,
 			wantStatus: http.StatusBadRequest, // Missing socket name

@@ -20,7 +20,7 @@ func RunDelete(cmd *cobra.Command, args []string, paths *management.SocketPaths)
 	client := createClient(paths.Management)
 
 	// Create the delete request
-	req, err := http.NewRequest("DELETE", "http://localhost/delete-socket", nil)
+	req, err := http.NewRequest("DELETE", "http://localhost/socket/delete", nil)
 	if err != nil {
 		exitWithError("Error creating request: %v", err)
 	}
