@@ -20,7 +20,7 @@ func RunDescribe(cmd *cobra.Command, args []string, paths *management.SocketPath
 	client := createClient(paths.Management)
 
 	// Create the describe request
-	req, err := http.NewRequest("GET", "http://localhost/describe-socket", nil)
+	req, err := http.NewRequest("GET", "http://localhost/socket/describe", nil)
 	if err != nil {
 		exitWithError("Error creating request: %v", err)
 	}

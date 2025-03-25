@@ -38,8 +38,8 @@ func TestRunCreate(t *testing.T) {
 		if r.Method != "POST" {
 			t.Errorf("Expected POST request, got %s", r.Method)
 		}
-		if r.URL.Path != "/create-socket" {
-			t.Errorf("Expected /create-socket path, got %s", r.URL.Path)
+		if r.URL.Path != "/socket/create" {
+			t.Errorf("Expected /socket/create path, got %s", r.URL.Path)
 		}
 
 		// Check if there's a config in the request
@@ -106,8 +106,8 @@ func TestRunDelete(t *testing.T) {
 		if r.Method != "DELETE" {
 			t.Errorf("Expected DELETE request, got %s", r.Method)
 		}
-		if r.URL.Path != "/delete-socket" {
-			t.Errorf("Expected /delete-socket path, got %s", r.URL.Path)
+		if r.URL.Path != "/socket/delete" {
+			t.Errorf("Expected /socket/delete path, got %s", r.URL.Path)
 		}
 		if r.Header.Get("Socket-Path") != "/var/run/test-socket.sock" {
 			t.Errorf("Expected Socket-Path header to be /var/run/test-socket.sock, got %s",
@@ -161,8 +161,8 @@ func TestRunList(t *testing.T) {
 		if r.Method != "GET" {
 			t.Errorf("Expected GET request, got %s", r.Method)
 		}
-		if r.URL.Path != "/list-sockets" {
-			t.Errorf("Expected /list-sockets path, got %s", r.URL.Path)
+		if r.URL.Path != "/socket/list" {
+			t.Errorf("Expected /socket/list path, got %s", r.URL.Path)
 		}
 
 		// Return a list of sockets
@@ -213,8 +213,8 @@ func TestRunDescribe(t *testing.T) {
 		if r.Method != "GET" {
 			t.Errorf("Expected GET request, got %s", r.Method)
 		}
-		if r.URL.Path != "/describe-socket" {
-			t.Errorf("Expected /describe-socket path, got %s", r.URL.Path)
+		if r.URL.Path != "/socket/describe" {
+			t.Errorf("Expected /socket/describe path, got %s", r.URL.Path)
 		}
 		if r.URL.Query().Get("socket") != "test-socket.sock" {
 			t.Errorf("Expected socket query param to be test-socket.sock, got %s",

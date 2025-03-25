@@ -39,7 +39,7 @@ func RunCreate(cmd *cobra.Command, paths *management.SocketPaths) {
 	client := createClient(paths.Management)
 
 	// Send the request
-	resp, err := client.Post("http://localhost/create-socket", "application/json", body)
+	resp, err := client.Post("http://localhost/socket/create", "application/json", body)
 	if err != nil {
 		exitWithError("Error requesting socket: %v", err)
 	}

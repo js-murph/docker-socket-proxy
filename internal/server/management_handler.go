@@ -41,45 +41,7 @@ func NewManagementHandler(dockerSocket string, configs map[string]*config.Socket
 		mux:           http.NewServeMux(), // Initialize mux immediately
 	}
 
-	// Register routes
-	h.mux.HandleFunc("/socket", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodPost:
-			h.CreateSocketHandler(w, r)
-		case http.MethodGet:
-			h.handleListSockets(w, r)
-		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		}
-	})
-
-	h.mux.HandleFunc("/socket/", func(w http.ResponseWriter, r *http.Request) {
-		// Extract socket ID from path
-		socketID := strings.TrimPrefix(r.URL.Path, "/socket/")
-		if socketID == "" {
-			http.Error(w, "Socket ID required", http.StatusBadRequest)
-			return
-		}
-
-		switch r.Method {
-		case http.MethodGet:
-			// Get socket details - create a new request with the socket parameter
-			query := r.URL.Query()
-			query.Set("socket", socketID)
-			r.URL.RawQuery = query.Encode()
-			h.handleDescribeSocket(w, r)
-		case http.MethodDelete:
-			// Delete specific socket - create a new request with the socket parameter
-			query := r.URL.Query()
-			query.Set("socket", socketID)
-			r.URL.RawQuery = query.Encode()
-			h.handleDeleteSocket(w, r)
-		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		}
-	})
-
-	h.mux.HandleFunc("/create-socket", func(w http.ResponseWriter, r *http.Request) {
+	h.mux.HandleFunc("/socket/create", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -87,7 +49,7 @@ func NewManagementHandler(dockerSocket string, configs map[string]*config.Socket
 		h.CreateSocketHandler(w, r)
 	})
 
-	h.mux.HandleFunc("/list-sockets", func(w http.ResponseWriter, r *http.Request) {
+	h.mux.HandleFunc("/socket/list", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -95,7 +57,7 @@ func NewManagementHandler(dockerSocket string, configs map[string]*config.Socket
 		h.handleListSockets(w, r)
 	})
 
-	h.mux.HandleFunc("/describe-socket", func(w http.ResponseWriter, r *http.Request) {
+	h.mux.HandleFunc("/socket/describe", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -103,7 +65,7 @@ func NewManagementHandler(dockerSocket string, configs map[string]*config.Socket
 		h.handleDescribeSocket(w, r)
 	})
 
-	h.mux.HandleFunc("/delete-socket", func(w http.ResponseWriter, r *http.Request) {
+	h.mux.HandleFunc("/socket/delete", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -123,7 +85,7 @@ func NewManagementHandler(dockerSocket string, configs map[string]*config.Socket
 		h.handleDeleteSocket(w, r)
 	})
 
-	h.mux.HandleFunc("/clean-sockets", func(w http.ResponseWriter, r *http.Request) {
+	h.mux.HandleFunc("/socket/clean", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
