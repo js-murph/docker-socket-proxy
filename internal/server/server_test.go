@@ -280,17 +280,17 @@ func TestApplyRewriteActions(t *testing.T) {
 				for _, action := range rule.Actions {
 					switch action.Action {
 					case "replace":
-						if matchesStructure(body, action.Contains) {
-							if mergeStructure(body, action.Update, true) {
+						if config.MatchesStructure(body, action.Contains) {
+							if config.MergeStructure(body, action.Update, true) {
 								modified = true
 							}
 						}
 					case "upsert":
-						if mergeStructure(body, action.Update, false) {
+						if config.MergeStructure(body, action.Update, false) {
 							modified = true
 						}
 					case "delete":
-						if deleteMatchingFields(body, action.Contains) {
+						if config.DeleteMatchingFields(body, action.Contains) {
 							modified = true
 						}
 					}

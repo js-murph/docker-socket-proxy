@@ -72,48 +72,6 @@ func TestValidateConfig(t *testing.T) {
 	}
 }
 
-func TestMatchPattern(t *testing.T) {
-	tests := []struct {
-		name    string
-		pattern string
-		value   string
-		want    bool
-	}{
-		{
-			name:    "exact match",
-			pattern: "test",
-			value:   "test",
-			want:    true,
-		},
-		{
-			name:    "wildcard match",
-			pattern: "test*",
-			value:   "testing",
-			want:    true,
-		},
-		{
-			name:    "no match",
-			pattern: "test",
-			value:   "other",
-			want:    false,
-		},
-		{
-			name:    "invalid pattern",
-			pattern: "[",
-			value:   "test",
-			want:    false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := MatchPattern(tt.pattern, tt.value); got != tt.want {
-				t.Errorf("MatchPattern() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestMatchValue(t *testing.T) {
 	tests := []struct {
 		name    string
