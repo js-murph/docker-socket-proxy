@@ -26,13 +26,13 @@ func MergeStructure(body map[string]any, update map[string]any, replace bool) bo
 				body[key] = updateMap
 				modified = true
 			}
-		} else if updateArray, ok := updateValue.([]interface{}); ok {
+		} else if updateArray, ok := updateValue.([]any); ok {
 			// Handle arrays
 			if actualValue, exists := body[key]; exists {
-				if actualArray, ok := actualValue.([]interface{}); ok {
+				if actualArray, ok := actualValue.([]any); ok {
 					if replace {
 						// For replace, we need to handle array replacements intelligently
-						newArray := make([]interface{}, 0)
+						newArray := make([]any, 0)
 						replacedIndices := make(map[int]bool)
 
 						// First, identify which elements in the original array should be replaced
@@ -76,7 +76,7 @@ func MergeStructure(body map[string]any, update map[string]any, replace bool) bo
 							}
 
 							// Create a copy of the original array
-							newArray := make([]interface{}, len(actualArray))
+							newArray := make([]any, len(actualArray))
 							copy(newArray, actualArray)
 
 							// Process each update item
@@ -166,10 +166,10 @@ func DeleteMatchingFields(body map[string]any, match map[string]any) bool {
 					modified = true
 				}
 			}
-		} else if matchArray, ok := matchValue.([]interface{}); ok {
+		} else if matchArray, ok := matchValue.([]any); ok {
 			// Handle arrays (like Env)
-			if actualArray, ok := actualValue.([]interface{}); ok {
-				newArray := make([]interface{}, 0, len(actualArray))
+			if actualArray, ok := actualValue.([]any); ok {
+				newArray := make([]any, 0, len(actualArray))
 				deleted := false
 
 				for _, item := range actualArray {
@@ -211,7 +211,7 @@ func DeleteMatchingFields(body map[string]any, match map[string]any) bool {
 }
 
 // isKeyValueArray checks if an array contains key-value pairs (strings with "=")
-func isKeyValueArray(arr []interface{}) bool {
+func isKeyValueArray(arr []any) bool {
 	if len(arr) == 0 {
 		return false
 	}

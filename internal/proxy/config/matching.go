@@ -23,95 +23,49 @@ func MatchValue(expected, actual interface{}) bool {
 	// Handle different types
 	switch exp := expected.(type) {
 	case string:
-		// String matching
-		switch act := actual.(type) {
-		case string:
-			// If it looks like a regex, use regex matching
-			if isRegexPattern(exp) {
-				return matchRegex(exp, act)
-			}
-			// Otherwise, use exact matching
-			return exp == act
-		case []interface{}:
-			// Check if any array element matches the string
-			for _, item := range act {
-				if str, ok := item.(string); ok {
-					// If it looks like a regex, use regex matching
-					if isRegexPattern(exp) {
-						if matchRegex(exp, str) {
-							return true
-						}
-					} else {
-						// Otherwise, use exact matching
-						if exp == str {
-							return true
-						}
-					}
-				}
-			}
-			return false
-		default:
-			return false
-		}
-	case []interface{}:
-		// Array matching
-		switch act := actual.(type) {
-		case []interface{}:
-			// Check if ALL items in expected are in actual
-			for _, expItem := range exp {
-				found := false
-				expStr, isExpStr := expItem.(string)
-
-				for _, actItem := range act {
-					actStr, isActStr := actItem.(string)
-
-					if isExpStr && isActStr {
-						// If it looks like a regex, use regex matching
-						if isRegexPattern(expStr) {
-							if matchRegex(expStr, actStr) {
-								found = true
-								break
-							}
-						} else {
-							// Otherwise, use exact matching
-							if expStr == actStr {
-								found = true
-								break
-							}
-						}
-					} else if reflect.DeepEqual(expItem, actItem) {
-						found = true
-						break
-					}
-				}
-
-				if !found {
-					return false // If any expected item is not found, return false
-				}
-			}
-			return true // All expected items were found
-		default:
-			return false
-		}
-	case map[string]any:
-		// Map matching
-		actMap, ok := actual.(map[string]any)
+		return matchStringValue(exp, actual)
+	case []any:
+		actualArray, ok := actual.([]any)
 		if !ok {
 			return false
 		}
-
-		// Check if ALL keys in expected are in actual with matching values
-		for key, expValue := range exp {
-			actValue, exists := actMap[key]
-			if !exists || !MatchValue(expValue, actValue) {
-				return false
-			}
+		return matchArrayValue(exp, actualArray)
+	case map[string]any:
+		actualMap, ok := actual.(map[string]any)
+		if !ok {
+			return false
 		}
-		return true
+		return matchMapValue(exp, actualMap)
 	default:
-		// For other types, use direct equality
 		return reflect.DeepEqual(expected, actual)
 	}
+}
+
+// matchStringValue handles string matching against various types
+func matchStringValue(expected string, actual interface{}) bool {
+	switch act := actual.(type) {
+	case string:
+		return matchString(expected, act)
+	case []any:
+		return matchStringInArray(expected, act)
+	default:
+		return false
+	}
+}
+
+// matchString matches a string against another string, handling regex patterns
+func matchString(expected, actual string) bool {
+	// First try exact match
+	if expected == actual {
+		return true
+	}
+
+	// Only try regex if the pattern contains regex metacharacters
+	if isRegexPattern(expected) {
+		return matchRegex(expected, actual)
+	}
+
+	return false
 }
 
 // Helper function to check if a string is a regex pattern
@@ -127,6 +81,53 @@ func isRegexPattern(s string) bool {
 	}
 
 	return false
+}
+
+// matchStringInArray checks if a string matches any element in an array
+func matchStringInArray(expected string, actual []any) bool {
+	for _, item := range actual {
+		if str, ok := item.(string); ok && matchString(expected, str) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchArrayValue handles array matching
+func matchArrayValue(expected, actual []any) bool {
+	for _, expItem := range expected {
+		if !findItemInArray(expItem, actual) {
+			return false
+		}
+	}
+	return true
+}
+
+// findItemInArray looks for an item in an array
+func findItemInArray(expected interface{}, actual []any) bool {
+	expStr, isExpStr := expected.(string)
+	for _, actItem := range actual {
+		actStr, isActStr := actItem.(string)
+		if isExpStr && isActStr {
+			if matchString(expStr, actStr) {
+				return true
+			}
+		} else if reflect.DeepEqual(expected, actItem) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchMapValue handles map matching
+func matchMapValue(expected, actual map[string]any) bool {
+	for key, expValue := range expected {
+		actValue, exists := actual[key]
+		if !exists || !MatchValue(expValue, actValue) {
+			return false
+		}
+	}
+	return true
 }
 
 // Helper function to match a regex pattern against a string

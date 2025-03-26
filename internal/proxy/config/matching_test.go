@@ -139,7 +139,7 @@ func TestContainsMatching(t *testing.T) {
 			name: "match simple env variable",
 			request: func() *http.Request {
 				body := map[string]any{
-					"Env": []interface{}{"DEBUG=true"},
+					"Env": []any{"DEBUG=true"},
 				}
 				bodyBytes, _ := json.Marshal(body)
 				req := httptest.NewRequest("POST", "/v1.24/containers/create", bytes.NewReader(bodyBytes))
@@ -150,7 +150,7 @@ func TestContainsMatching(t *testing.T) {
 				Path:   "/v1.*/containers/create",
 				Method: "POST",
 				Contains: map[string]any{
-					"Env": []interface{}{"DEBUG=true"},
+					"Env": []any{"DEBUG=true"},
 				},
 			},
 			want: true,
@@ -159,7 +159,7 @@ func TestContainsMatching(t *testing.T) {
 			name: "match partial env variable",
 			request: func() *http.Request {
 				body := map[string]any{
-					"Env": []interface{}{"DEBUG=true", "APP=test"},
+					"Env": []any{"DEBUG=true", "APP=test"},
 				}
 				bodyBytes, _ := json.Marshal(body)
 				req := httptest.NewRequest("POST", "/v1.24/containers/create", bytes.NewReader(bodyBytes))
@@ -170,7 +170,7 @@ func TestContainsMatching(t *testing.T) {
 				Path:   "/v1.*/containers/create",
 				Method: "POST",
 				Contains: map[string]any{
-					"Env": []interface{}{"DEBUG.*"},
+					"Env": []any{"DEBUG.*"},
 				},
 			},
 			want: true,
@@ -203,7 +203,7 @@ func TestContainsMatching(t *testing.T) {
 			name: "no match env variable",
 			request: func() *http.Request {
 				body := map[string]any{
-					"Env": []interface{}{"APP=test"},
+					"Env": []any{"APP=test"},
 				}
 				bodyBytes, _ := json.Marshal(body)
 				req := httptest.NewRequest("POST", "/v1.24/containers/create", bytes.NewReader(bodyBytes))
@@ -214,7 +214,7 @@ func TestContainsMatching(t *testing.T) {
 				Path:   "/v1.*/containers/create",
 				Method: "POST",
 				Contains: map[string]any{
-					"Env": []interface{}{"DEBUG=true"},
+					"Env": []any{"DEBUG=true"},
 				},
 			},
 			want: false,
@@ -249,7 +249,7 @@ func TestContainsMatching(t *testing.T) {
 			request: func() *http.Request {
 				body := map[string]any{
 					"HostConfig": map[string]any{
-						"Binds": []interface{}{
+						"Binds": []any{
 							"/host/path:/container/path",
 							"/another/path:/another/container/path",
 						},
@@ -265,7 +265,7 @@ func TestContainsMatching(t *testing.T) {
 				Method: "POST",
 				Contains: map[string]any{
 					"HostConfig": map[string]any{
-						"Binds": []interface{}{"/host/path:/container/path"},
+						"Binds": []any{"/host/path:/container/path"},
 					},
 				},
 			},
@@ -275,10 +275,10 @@ func TestContainsMatching(t *testing.T) {
 			name: "match multiple conditions",
 			request: func() *http.Request {
 				body := map[string]any{
-					"Env": []interface{}{"DEBUG=true", "APP=test"},
+					"Env": []any{"DEBUG=true", "APP=test"},
 					"HostConfig": map[string]any{
 						"Privileged": true,
-						"Binds": []interface{}{
+						"Binds": []any{
 							"/host/path:/container/path",
 						},
 					},
@@ -295,7 +295,7 @@ func TestContainsMatching(t *testing.T) {
 				Path:   "/v1.*/containers/create",
 				Method: "POST",
 				Contains: map[string]any{
-					"Env": []interface{}{"DEBUG=true"},
+					"Env": []any{"DEBUG=true"},
 					"HostConfig": map[string]any{
 						"Privileged": true,
 					},
@@ -310,7 +310,7 @@ func TestContainsMatching(t *testing.T) {
 			name: "no match multiple conditions",
 			request: func() *http.Request {
 				body := map[string]any{
-					"Env": []interface{}{"DEBUG=true", "APP=test"},
+					"Env": []any{"DEBUG=true", "APP=test"},
 					"HostConfig": map[string]any{
 						"Privileged": false,
 					},
@@ -324,7 +324,7 @@ func TestContainsMatching(t *testing.T) {
 				Path:   "/v1.*/containers/create",
 				Method: "POST",
 				Contains: map[string]any{
-					"Env": []interface{}{"DEBUG=true"},
+					"Env": []any{"DEBUG=true"},
 					"HostConfig": map[string]any{
 						"Privileged": true,
 					},

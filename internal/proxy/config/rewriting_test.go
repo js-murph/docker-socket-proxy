@@ -21,7 +21,7 @@ func TestApplyRewriteActions(t *testing.T) {
 		{
 			name: "replace env var",
 			body: map[string]any{
-				"Env": []interface{}{"DEBUG=true", "OTHER=value"},
+				"Env": []any{"DEBUG=true", "OTHER=value"},
 			},
 			actions: []Rule{
 				{
@@ -35,21 +35,21 @@ func TestApplyRewriteActions(t *testing.T) {
 						{
 							Action: "replace",
 							Update: map[string]any{
-								"Env": []interface{}{"DEBUG=false", "OTHER=value"},
+								"Env": []any{"DEBUG=false", "OTHER=value"},
 							},
 						},
 					},
 				},
 			},
 			wantBody: map[string]any{
-				"Env": []interface{}{"DEBUG=false", "OTHER=value"},
+				"Env": []any{"DEBUG=false", "OTHER=value"},
 			},
 			wantModified: true,
 		},
 		{
 			name: "upsert env var",
 			body: map[string]any{
-				"Env": []interface{}{"EXISTING=true"},
+				"Env": []any{"EXISTING=true"},
 			},
 			actions: []Rule{
 				{
@@ -57,21 +57,21 @@ func TestApplyRewriteActions(t *testing.T) {
 						{
 							Action: "upsert",
 							Update: map[string]any{
-								"Env": []interface{}{"NEW=value"},
+								"Env": []any{"NEW=value"},
 							},
 						},
 					},
 				},
 			},
 			wantBody: map[string]any{
-				"Env": []interface{}{"EXISTING=true", "NEW=value"},
+				"Env": []any{"EXISTING=true", "NEW=value"},
 			},
 			wantModified: true,
 		},
 		{
 			name: "delete env var",
 			body: map[string]any{
-				"Env": []interface{}{"DEBUG=true", "KEEP=value"},
+				"Env": []any{"DEBUG=true", "KEEP=value"},
 			},
 			actions: []Rule{
 				{
@@ -79,14 +79,14 @@ func TestApplyRewriteActions(t *testing.T) {
 						{
 							Action: "delete",
 							Contains: map[string]any{
-								"Env": []interface{}{"DEBUG=true"},
+								"Env": []any{"DEBUG=true"},
 							},
 						},
 					},
 				},
 			},
 			wantBody: map[string]any{
-				"Env": []interface{}{"KEEP=value"},
+				"Env": []any{"KEEP=value"},
 			},
 			wantModified: true,
 		},
@@ -197,7 +197,7 @@ func TestApplyRewriteRules(t *testing.T) {
 							{
 								Action: "upsert",
 								Update: map[string]any{
-									"Env": []interface{}{"ADDED=true"},
+									"Env": []any{"ADDED=true"},
 								},
 							},
 							{
@@ -218,13 +218,13 @@ func TestApplyRewriteRules(t *testing.T) {
 				},
 			},
 			request: createTestRequest(map[string]any{
-				"Env": []interface{}{"EXISTING=true"},
+				"Env": []any{"EXISTING=true"},
 				"HostConfig": map[string]any{
 					"Privileged": true,
 				},
 			}),
 			wantBody: map[string]any{
-				"Env": []interface{}{"EXISTING=true", "ADDED=true"},
+				"Env": []any{"EXISTING=true", "ADDED=true"},
 				"HostConfig": map[string]any{
 					"Privileged": false,
 				},

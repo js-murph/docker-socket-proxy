@@ -93,8 +93,8 @@ func TestMatchValue(t *testing.T) {
 		},
 		{
 			name:    "array match",
-			pattern: []interface{}{"test*"},
-			value:   []interface{}{"testing"},
+			pattern: []any{"test*"},
+			value:   []any{"testing"},
 			want:    true,
 		},
 		{
@@ -305,20 +305,20 @@ func TestContainsValue(t *testing.T) {
 		},
 		{
 			name:     "array contains string",
-			actual:   []interface{}{"DEBUG=true", "APP=test"},
+			actual:   []any{"DEBUG=true", "APP=test"},
 			expected: "DEBUG=true",
 			want:     true,
 		},
 		{
 			name:     "array contains all strings in expected array",
-			actual:   []interface{}{"DEBUG=true", "APP=test", "LEVEL=info"},
-			expected: []interface{}{"DEBUG=true", "APP=test"},
+			actual:   []any{"DEBUG=true", "APP=test", "LEVEL=info"},
+			expected: []any{"DEBUG=true", "APP=test"},
 			want:     true,
 		},
 		{
 			name:     "array does not contain all strings in expected array",
-			actual:   []interface{}{"DEBUG=true", "APP=test"},
-			expected: []interface{}{"DEBUG=true", "LEVEL=info"},
+			actual:   []any{"DEBUG=true", "APP=test"},
+			expected: []any{"DEBUG=true", "LEVEL=info"},
 			want:     false,
 		},
 		{
@@ -359,7 +359,7 @@ func TestContainsValue(t *testing.T) {
 		},
 		{
 			name:     "regex match in array",
-			actual:   []interface{}{"DEBUG_LEVEL=verbose", "APP=test"},
+			actual:   []any{"DEBUG_LEVEL=verbose", "APP=test"},
 			expected: "DEBUG.*verbose",
 			want:     true,
 		},

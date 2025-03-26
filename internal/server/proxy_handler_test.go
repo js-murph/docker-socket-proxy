@@ -84,7 +84,7 @@ func TestProxyHandler_ProcessRules(t *testing.T) {
 			name: "deny with matching body content",
 			request: func() *http.Request {
 				body := map[string]any{
-					"Env": []interface{}{"BLOCK=true"},
+					"Env": []any{"BLOCK=true"},
 				}
 				bodyBytes, _ := json.Marshal(body)
 				req := httptest.NewRequest("POST", "/v1.42/containers/create", bytes.NewBuffer(bodyBytes))
@@ -102,7 +102,7 @@ func TestProxyHandler_ProcessRules(t *testing.T) {
 							{
 								Action:   "deny",
 								Reason:   "Blocked by environment variable",
-								Contains: map[string]any{"Env": []interface{}{"BLOCK=true"}},
+								Contains: map[string]any{"Env": []any{"BLOCK=true"}},
 							},
 						},
 					},
@@ -115,7 +115,7 @@ func TestProxyHandler_ProcessRules(t *testing.T) {
 			name: "allow when body doesn't match deny condition",
 			request: func() *http.Request {
 				body := map[string]any{
-					"Env": []interface{}{"ALLOW=true"},
+					"Env": []any{"ALLOW=true"},
 				}
 				bodyBytes, _ := json.Marshal(body)
 				req := httptest.NewRequest("POST", "/v1.42/containers/create", bytes.NewBuffer(bodyBytes))
@@ -133,7 +133,7 @@ func TestProxyHandler_ProcessRules(t *testing.T) {
 							{
 								Action:   "deny",
 								Reason:   "Blocked by environment variable",
-								Contains: map[string]any{"Env": []interface{}{"BLOCK=true"}},
+								Contains: map[string]any{"Env": []any{"BLOCK=true"}},
 							},
 						},
 					},
@@ -183,7 +183,7 @@ func TestProxyHandler_ProcessRules(t *testing.T) {
 			name: "deny with rule match contains and action contains",
 			request: func() *http.Request {
 				body := map[string]any{
-					"Env":     []interface{}{"DEBUG=true"},
+					"Env":     []any{"DEBUG=true"},
 					"Network": "host",
 				}
 				bodyBytes, _ := json.Marshal(body)
@@ -197,7 +197,7 @@ func TestProxyHandler_ProcessRules(t *testing.T) {
 						Match: config.Match{
 							Path:     "/v1.*/containers/create",
 							Method:   "POST",
-							Contains: map[string]any{"Env": []interface{}{"DEBUG=true"}},
+							Contains: map[string]any{"Env": []any{"DEBUG=true"}},
 						},
 						Actions: []config.Action{
 							{
@@ -216,7 +216,7 @@ func TestProxyHandler_ProcessRules(t *testing.T) {
 			name: "allow skips subsequent deny rules",
 			request: func() *http.Request {
 				body := map[string]any{
-					"Env": []interface{}{"ALLOW=true", "BLOCK=true"},
+					"Env": []any{"ALLOW=true", "BLOCK=true"},
 				}
 				bodyBytes, _ := json.Marshal(body)
 				req := httptest.NewRequest("POST", "/v1.42/containers/create", bytes.NewBuffer(bodyBytes))
@@ -230,7 +230,7 @@ func TestProxyHandler_ProcessRules(t *testing.T) {
 							Path:   "/v1.*/containers/create",
 							Method: "POST",
 							Contains: map[string]any{
-								"Env": []interface{}{"ALLOW=true"},
+								"Env": []any{"ALLOW=true"},
 							},
 						},
 						Actions: []config.Action{
@@ -245,7 +245,7 @@ func TestProxyHandler_ProcessRules(t *testing.T) {
 							Path:   "/v1.*/containers/create",
 							Method: "POST",
 							Contains: map[string]any{
-								"Env": []interface{}{"BLOCK=true"},
+								"Env": []any{"BLOCK=true"},
 							},
 						},
 						Actions: []config.Action{
@@ -264,7 +264,7 @@ func TestProxyHandler_ProcessRules(t *testing.T) {
 			name: "allow in first action skips subsequent deny actions in same rule",
 			request: func() *http.Request {
 				body := map[string]any{
-					"Env": []interface{}{"MIXED=true"},
+					"Env": []any{"MIXED=true"},
 				}
 				bodyBytes, _ := json.Marshal(body)
 				req := httptest.NewRequest("POST", "/v1.42/containers/create", bytes.NewBuffer(bodyBytes))
@@ -298,7 +298,7 @@ func TestProxyHandler_ProcessRules(t *testing.T) {
 			name: "body remains readable after allow",
 			request: func() *http.Request {
 				body := map[string]any{
-					"Env": []interface{}{"TEST=true"},
+					"Env": []any{"TEST=true"},
 				}
 				bodyBytes, _ := json.Marshal(body)
 				req := httptest.NewRequest("POST", "/v1.42/containers/create", bytes.NewBuffer(bodyBytes))

@@ -165,7 +165,7 @@ func (c *SocketConfig) GetPropagationRules() []Rule {
 					Action: "upsert",
 					Update: map[string]any{
 						"HostConfig": map[string]any{
-							"Binds": []interface{}{
+							"Binds": []any{
 								fmt.Sprintf("%s:%s:ro", c.Config.PropagateSocket, c.Config.PropagateSocket),
 							},
 						},
