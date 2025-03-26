@@ -108,7 +108,7 @@ func (h *ProxyHandler) processRules(r *http.Request, socketConfig *config.Socket
 
 	// For POST/PUT requests that might need rewrites
 	var bodyBytes []byte
-	var body map[string]interface{}
+	var body map[string]any
 	modified := false
 
 	if r.Method == "POST" || r.Method == "PUT" && r.Body != nil {
@@ -290,7 +290,7 @@ func (h *ProxyHandler) ruleMatches(r *http.Request, match config.Match) bool {
 		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
 		// Parse the JSON body
-		var bodyJSON map[string]interface{}
+		var bodyJSON map[string]any
 		if err := json.Unmarshal(bodyBytes, &bodyJSON); err != nil {
 			log.Error("Error parsing request body", "error", err)
 			return false

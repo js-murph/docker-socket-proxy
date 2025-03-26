@@ -13,14 +13,14 @@ import (
 func TestApplyRewriteActions(t *testing.T) {
 	tests := []struct {
 		name         string
-		body         map[string]interface{}
+		body         map[string]any
 		actions      []Rule
-		wantBody     map[string]interface{}
+		wantBody     map[string]any
 		wantModified bool
 	}{
 		{
 			name: "replace env var",
-			body: map[string]interface{}{
+			body: map[string]any{
 				"Env": []interface{}{"DEBUG=true", "OTHER=value"},
 			},
 			actions: []Rule{
@@ -28,27 +28,27 @@ func TestApplyRewriteActions(t *testing.T) {
 					Actions: []Action{
 						{
 							Action: "replace",
-							Contains: map[string]interface{}{
+							Contains: map[string]any{
 								"Env": "DEBUG=true",
 							},
 						},
 						{
 							Action: "replace",
-							Update: map[string]interface{}{
+							Update: map[string]any{
 								"Env": []interface{}{"DEBUG=false", "OTHER=value"},
 							},
 						},
 					},
 				},
 			},
-			wantBody: map[string]interface{}{
+			wantBody: map[string]any{
 				"Env": []interface{}{"DEBUG=false", "OTHER=value"},
 			},
 			wantModified: true,
 		},
 		{
 			name: "upsert env var",
-			body: map[string]interface{}{
+			body: map[string]any{
 				"Env": []interface{}{"EXISTING=true"},
 			},
 			actions: []Rule{
@@ -56,21 +56,21 @@ func TestApplyRewriteActions(t *testing.T) {
 					Actions: []Action{
 						{
 							Action: "upsert",
-							Update: map[string]interface{}{
+							Update: map[string]any{
 								"Env": []interface{}{"NEW=value"},
 							},
 						},
 					},
 				},
 			},
-			wantBody: map[string]interface{}{
+			wantBody: map[string]any{
 				"Env": []interface{}{"EXISTING=true", "NEW=value"},
 			},
 			wantModified: true,
 		},
 		{
 			name: "delete env var",
-			body: map[string]interface{}{
+			body: map[string]any{
 				"Env": []interface{}{"DEBUG=true", "KEEP=value"},
 			},
 			actions: []Rule{
@@ -78,22 +78,22 @@ func TestApplyRewriteActions(t *testing.T) {
 					Actions: []Action{
 						{
 							Action: "delete",
-							Contains: map[string]interface{}{
+							Contains: map[string]any{
 								"Env": []interface{}{"DEBUG=true"},
 							},
 						},
 					},
 				},
 			},
-			wantBody: map[string]interface{}{
+			wantBody: map[string]any{
 				"Env": []interface{}{"KEEP=value"},
 			},
 			wantModified: true,
 		},
 		{
 			name: "replace boolean field",
-			body: map[string]interface{}{
-				"HostConfig": map[string]interface{}{
+			body: map[string]any{
+				"HostConfig": map[string]any{
 					"Privileged": true,
 				},
 			},
@@ -102,13 +102,13 @@ func TestApplyRewriteActions(t *testing.T) {
 					Actions: []Action{
 						{
 							Action: "replace",
-							Contains: map[string]interface{}{
-								"HostConfig": map[string]interface{}{
+							Contains: map[string]any{
+								"HostConfig": map[string]any{
 									"Privileged": true,
 								},
 							},
-							Update: map[string]interface{}{
-								"HostConfig": map[string]interface{}{
+							Update: map[string]any{
+								"HostConfig": map[string]any{
 									"Privileged": false,
 								},
 							},
@@ -116,8 +116,8 @@ func TestApplyRewriteActions(t *testing.T) {
 					},
 				},
 			},
-			wantBody: map[string]interface{}{
-				"HostConfig": map[string]interface{}{
+			wantBody: map[string]any{
+				"HostConfig": map[string]any{
 					"Privileged": false,
 				},
 			},
@@ -128,7 +128,7 @@ func TestApplyRewriteActions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Make a copy of the body to avoid modifying the test case
-			body := make(map[string]interface{})
+			body := make(map[string]any)
 			for k, v := range tt.body {
 				body[k] = v
 			}
@@ -169,7 +169,7 @@ func TestApplyRewriteActions(t *testing.T) {
 	}
 }
 
-func createTestRequest(body map[string]interface{}) *http.Request {
+func createTestRequest(body map[string]any) *http.Request {
 	jsonBody, _ := json.Marshal(body)
 	req := httptest.NewRequest("POST", "/v1.42/containers/create", bytes.NewBuffer(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -181,7 +181,7 @@ func TestApplyRewriteRules(t *testing.T) {
 		name         string
 		config       *SocketConfig
 		request      *http.Request
-		wantBody     map[string]interface{}
+		wantBody     map[string]any
 		wantModified bool
 	}{
 		{
@@ -196,19 +196,19 @@ func TestApplyRewriteRules(t *testing.T) {
 						Actions: []Action{
 							{
 								Action: "upsert",
-								Update: map[string]interface{}{
+								Update: map[string]any{
 									"Env": []interface{}{"ADDED=true"},
 								},
 							},
 							{
 								Action: "replace",
-								Contains: map[string]interface{}{
-									"HostConfig": map[string]interface{}{
+								Contains: map[string]any{
+									"HostConfig": map[string]any{
 										"Privileged": true,
 									},
 								},
-								Update: map[string]interface{}{
-									"HostConfig": map[string]interface{}{
+								Update: map[string]any{
+									"HostConfig": map[string]any{
 										"Privileged": false,
 									},
 								},
@@ -217,15 +217,15 @@ func TestApplyRewriteRules(t *testing.T) {
 					},
 				},
 			},
-			request: createTestRequest(map[string]interface{}{
+			request: createTestRequest(map[string]any{
 				"Env": []interface{}{"EXISTING=true"},
-				"HostConfig": map[string]interface{}{
+				"HostConfig": map[string]any{
 					"Privileged": true,
 				},
 			}),
-			wantBody: map[string]interface{}{
+			wantBody: map[string]any{
 				"Env": []interface{}{"EXISTING=true", "ADDED=true"},
-				"HostConfig": map[string]interface{}{
+				"HostConfig": map[string]any{
 					"Privileged": false,
 				},
 			},
@@ -240,7 +240,7 @@ func TestApplyRewriteRules(t *testing.T) {
 			tt.request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
 			// Parse the body
-			var body map[string]interface{}
+			var body map[string]any
 			if err := json.Unmarshal(bodyBytes, &body); err != nil {
 				t.Fatalf("Failed to parse request body: %v", err)
 			}

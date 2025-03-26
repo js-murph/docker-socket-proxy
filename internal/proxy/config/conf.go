@@ -29,17 +29,17 @@ type Rule struct {
 
 // Match represents a match criteria
 type Match struct {
-	Path     string                 `json:"path" yaml:"path"`
-	Method   string                 `json:"method" yaml:"method"`
-	Contains map[string]interface{} `json:"contains,omitempty" yaml:"contains,omitempty"`
+	Path     string         `json:"path" yaml:"path"`
+	Method   string         `json:"method" yaml:"method"`
+	Contains map[string]any `json:"contains,omitempty" yaml:"contains,omitempty"`
 }
 
 // Action represents an action to take
 type Action struct {
-	Action   string                 `json:"action" yaml:"action"`
-	Reason   string                 `json:"reason,omitempty" yaml:"reason,omitempty"`
-	Contains map[string]interface{} `json:"contains,omitempty" yaml:"contains,omitempty"`
-	Update   map[string]interface{} `json:"update,omitempty" yaml:"update,omitempty"`
+	Action   string         `json:"action" yaml:"action"`
+	Reason   string         `json:"reason,omitempty" yaml:"reason,omitempty"`
+	Contains map[string]any `json:"contains,omitempty" yaml:"contains,omitempty"`
+	Update   map[string]any `json:"update,omitempty" yaml:"update,omitempty"`
 }
 
 // LoadSocketConfig loads a socket configuration from a file
@@ -163,8 +163,8 @@ func (c *SocketConfig) GetPropagationRules() []Rule {
 			Actions: []Action{
 				{
 					Action: "upsert",
-					Update: map[string]interface{}{
-						"HostConfig": map[string]interface{}{
+					Update: map[string]any{
+						"HostConfig": map[string]any{
 							"Binds": []interface{}{
 								fmt.Sprintf("%s:%s:ro", c.Config.PropagateSocket, c.Config.PropagateSocket),
 							},

@@ -93,9 +93,9 @@ func MatchValue(expected, actual interface{}) bool {
 		default:
 			return false
 		}
-	case map[string]interface{}:
+	case map[string]any:
 		// Map matching
-		actMap, ok := actual.(map[string]interface{})
+		actMap, ok := actual.(map[string]any)
 		if !ok {
 			return false
 		}
@@ -169,7 +169,7 @@ func MatchesRule(r *http.Request, match Match) bool {
 		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
 		// Parse the JSON body
-		var body map[string]interface{}
+		var body map[string]any
 		if err := json.Unmarshal(bodyBytes, &body); err != nil {
 			return false
 		}
@@ -184,7 +184,7 @@ func MatchesRule(r *http.Request, match Match) bool {
 }
 
 // MatchesStructure checks if a body matches a structure
-func MatchesStructure(body map[string]interface{}, match map[string]interface{}) bool {
+func MatchesStructure(body map[string]any, match map[string]any) bool {
 	for key, expectedValue := range match {
 		actualValue, exists := body[key]
 		if !exists {
@@ -192,8 +192,8 @@ func MatchesStructure(body map[string]interface{}, match map[string]interface{})
 		}
 
 		// If the expected value is a map, recurse into it
-		if expectedMap, ok := expectedValue.(map[string]interface{}); ok {
-			if actualMap, ok := actualValue.(map[string]interface{}); ok {
+		if expectedMap, ok := expectedValue.(map[string]any); ok {
+			if actualMap, ok := actualValue.(map[string]any); ok {
 				if !MatchesStructure(actualMap, expectedMap) {
 					return false
 				}

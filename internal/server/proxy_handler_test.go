@@ -83,7 +83,7 @@ func TestProxyHandler_ProcessRules(t *testing.T) {
 		{
 			name: "deny with matching body content",
 			request: func() *http.Request {
-				body := map[string]interface{}{
+				body := map[string]any{
 					"Env": []interface{}{"BLOCK=true"},
 				}
 				bodyBytes, _ := json.Marshal(body)
@@ -102,7 +102,7 @@ func TestProxyHandler_ProcessRules(t *testing.T) {
 							{
 								Action:   "deny",
 								Reason:   "Blocked by environment variable",
-								Contains: map[string]interface{}{"Env": []interface{}{"BLOCK=true"}},
+								Contains: map[string]any{"Env": []interface{}{"BLOCK=true"}},
 							},
 						},
 					},
@@ -114,7 +114,7 @@ func TestProxyHandler_ProcessRules(t *testing.T) {
 		{
 			name: "allow when body doesn't match deny condition",
 			request: func() *http.Request {
-				body := map[string]interface{}{
+				body := map[string]any{
 					"Env": []interface{}{"ALLOW=true"},
 				}
 				bodyBytes, _ := json.Marshal(body)
@@ -133,7 +133,7 @@ func TestProxyHandler_ProcessRules(t *testing.T) {
 							{
 								Action:   "deny",
 								Reason:   "Blocked by environment variable",
-								Contains: map[string]interface{}{"Env": []interface{}{"BLOCK=true"}},
+								Contains: map[string]any{"Env": []interface{}{"BLOCK=true"}},
 							},
 						},
 					},
@@ -145,8 +145,8 @@ func TestProxyHandler_ProcessRules(t *testing.T) {
 		{
 			name: "deny with nested content match",
 			request: func() *http.Request {
-				body := map[string]interface{}{
-					"HostConfig": map[string]interface{}{
+				body := map[string]any{
+					"HostConfig": map[string]any{
 						"Privileged": true,
 					},
 				}
@@ -166,8 +166,8 @@ func TestProxyHandler_ProcessRules(t *testing.T) {
 							{
 								Action: "deny",
 								Reason: "Privileged containers not allowed",
-								Contains: map[string]interface{}{
-									"HostConfig": map[string]interface{}{
+								Contains: map[string]any{
+									"HostConfig": map[string]any{
 										"Privileged": true,
 									},
 								},
@@ -182,7 +182,7 @@ func TestProxyHandler_ProcessRules(t *testing.T) {
 		{
 			name: "deny with rule match contains and action contains",
 			request: func() *http.Request {
-				body := map[string]interface{}{
+				body := map[string]any{
 					"Env":     []interface{}{"DEBUG=true"},
 					"Network": "host",
 				}
@@ -197,13 +197,13 @@ func TestProxyHandler_ProcessRules(t *testing.T) {
 						Match: config.Match{
 							Path:     "/v1.*/containers/create",
 							Method:   "POST",
-							Contains: map[string]interface{}{"Env": []interface{}{"DEBUG=true"}},
+							Contains: map[string]any{"Env": []interface{}{"DEBUG=true"}},
 						},
 						Actions: []config.Action{
 							{
 								Action:   "deny",
 								Reason:   "Host network not allowed with debug mode",
-								Contains: map[string]interface{}{"Network": "host"},
+								Contains: map[string]any{"Network": "host"},
 							},
 						},
 					},
@@ -215,7 +215,7 @@ func TestProxyHandler_ProcessRules(t *testing.T) {
 		{
 			name: "allow skips subsequent deny rules",
 			request: func() *http.Request {
-				body := map[string]interface{}{
+				body := map[string]any{
 					"Env": []interface{}{"ALLOW=true", "BLOCK=true"},
 				}
 				bodyBytes, _ := json.Marshal(body)
@@ -229,7 +229,7 @@ func TestProxyHandler_ProcessRules(t *testing.T) {
 						Match: config.Match{
 							Path:   "/v1.*/containers/create",
 							Method: "POST",
-							Contains: map[string]interface{}{
+							Contains: map[string]any{
 								"Env": []interface{}{"ALLOW=true"},
 							},
 						},
@@ -244,7 +244,7 @@ func TestProxyHandler_ProcessRules(t *testing.T) {
 						Match: config.Match{
 							Path:   "/v1.*/containers/create",
 							Method: "POST",
-							Contains: map[string]interface{}{
+							Contains: map[string]any{
 								"Env": []interface{}{"BLOCK=true"},
 							},
 						},
@@ -263,7 +263,7 @@ func TestProxyHandler_ProcessRules(t *testing.T) {
 		{
 			name: "allow in first action skips subsequent deny actions in same rule",
 			request: func() *http.Request {
-				body := map[string]interface{}{
+				body := map[string]any{
 					"Env": []interface{}{"MIXED=true"},
 				}
 				bodyBytes, _ := json.Marshal(body)
@@ -297,7 +297,7 @@ func TestProxyHandler_ProcessRules(t *testing.T) {
 		{
 			name: "body remains readable after allow",
 			request: func() *http.Request {
-				body := map[string]interface{}{
+				body := map[string]any{
 					"Env": []interface{}{"TEST=true"},
 				}
 				bodyBytes, _ := json.Marshal(body)

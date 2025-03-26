@@ -138,7 +138,7 @@ func TestContainsMatching(t *testing.T) {
 		{
 			name: "match simple env variable",
 			request: func() *http.Request {
-				body := map[string]interface{}{
+				body := map[string]any{
 					"Env": []interface{}{"DEBUG=true"},
 				}
 				bodyBytes, _ := json.Marshal(body)
@@ -149,7 +149,7 @@ func TestContainsMatching(t *testing.T) {
 			match: Match{
 				Path:   "/v1.*/containers/create",
 				Method: "POST",
-				Contains: map[string]interface{}{
+				Contains: map[string]any{
 					"Env": []interface{}{"DEBUG=true"},
 				},
 			},
@@ -158,7 +158,7 @@ func TestContainsMatching(t *testing.T) {
 		{
 			name: "match partial env variable",
 			request: func() *http.Request {
-				body := map[string]interface{}{
+				body := map[string]any{
 					"Env": []interface{}{"DEBUG=true", "APP=test"},
 				}
 				bodyBytes, _ := json.Marshal(body)
@@ -169,7 +169,7 @@ func TestContainsMatching(t *testing.T) {
 			match: Match{
 				Path:   "/v1.*/containers/create",
 				Method: "POST",
-				Contains: map[string]interface{}{
+				Contains: map[string]any{
 					"Env": []interface{}{"DEBUG.*"},
 				},
 			},
@@ -178,8 +178,8 @@ func TestContainsMatching(t *testing.T) {
 		{
 			name: "match nested field",
 			request: func() *http.Request {
-				body := map[string]interface{}{
-					"HostConfig": map[string]interface{}{
+				body := map[string]any{
+					"HostConfig": map[string]any{
 						"Privileged": true,
 					},
 				}
@@ -191,8 +191,8 @@ func TestContainsMatching(t *testing.T) {
 			match: Match{
 				Path:   "/v1.*/containers/create",
 				Method: "POST",
-				Contains: map[string]interface{}{
-					"HostConfig": map[string]interface{}{
+				Contains: map[string]any{
+					"HostConfig": map[string]any{
 						"Privileged": true,
 					},
 				},
@@ -202,7 +202,7 @@ func TestContainsMatching(t *testing.T) {
 		{
 			name: "no match env variable",
 			request: func() *http.Request {
-				body := map[string]interface{}{
+				body := map[string]any{
 					"Env": []interface{}{"APP=test"},
 				}
 				bodyBytes, _ := json.Marshal(body)
@@ -213,7 +213,7 @@ func TestContainsMatching(t *testing.T) {
 			match: Match{
 				Path:   "/v1.*/containers/create",
 				Method: "POST",
-				Contains: map[string]interface{}{
+				Contains: map[string]any{
 					"Env": []interface{}{"DEBUG=true"},
 				},
 			},
@@ -222,8 +222,8 @@ func TestContainsMatching(t *testing.T) {
 		{
 			name: "match labels",
 			request: func() *http.Request {
-				body := map[string]interface{}{
-					"Labels": map[string]interface{}{
+				body := map[string]any{
+					"Labels": map[string]any{
 						"com.example.label1": "value1",
 						"com.example.label2": "value2",
 					},
@@ -236,8 +236,8 @@ func TestContainsMatching(t *testing.T) {
 			match: Match{
 				Path:   "/v1.*/containers/create",
 				Method: "POST",
-				Contains: map[string]interface{}{
-					"Labels": map[string]interface{}{
+				Contains: map[string]any{
+					"Labels": map[string]any{
 						"com.example.label1": "value1",
 					},
 				},
@@ -247,8 +247,8 @@ func TestContainsMatching(t *testing.T) {
 		{
 			name: "match volume mounts",
 			request: func() *http.Request {
-				body := map[string]interface{}{
-					"HostConfig": map[string]interface{}{
+				body := map[string]any{
+					"HostConfig": map[string]any{
 						"Binds": []interface{}{
 							"/host/path:/container/path",
 							"/another/path:/another/container/path",
@@ -263,8 +263,8 @@ func TestContainsMatching(t *testing.T) {
 			match: Match{
 				Path:   "/v1.*/containers/create",
 				Method: "POST",
-				Contains: map[string]interface{}{
-					"HostConfig": map[string]interface{}{
+				Contains: map[string]any{
+					"HostConfig": map[string]any{
 						"Binds": []interface{}{"/host/path:/container/path"},
 					},
 				},
@@ -274,15 +274,15 @@ func TestContainsMatching(t *testing.T) {
 		{
 			name: "match multiple conditions",
 			request: func() *http.Request {
-				body := map[string]interface{}{
+				body := map[string]any{
 					"Env": []interface{}{"DEBUG=true", "APP=test"},
-					"HostConfig": map[string]interface{}{
+					"HostConfig": map[string]any{
 						"Privileged": true,
 						"Binds": []interface{}{
 							"/host/path:/container/path",
 						},
 					},
-					"Labels": map[string]interface{}{
+					"Labels": map[string]any{
 						"com.example.label1": "value1",
 					},
 				}
@@ -294,12 +294,12 @@ func TestContainsMatching(t *testing.T) {
 			match: Match{
 				Path:   "/v1.*/containers/create",
 				Method: "POST",
-				Contains: map[string]interface{}{
+				Contains: map[string]any{
 					"Env": []interface{}{"DEBUG=true"},
-					"HostConfig": map[string]interface{}{
+					"HostConfig": map[string]any{
 						"Privileged": true,
 					},
-					"Labels": map[string]interface{}{
+					"Labels": map[string]any{
 						"com.example.label1": "value1",
 					},
 				},
@@ -309,9 +309,9 @@ func TestContainsMatching(t *testing.T) {
 		{
 			name: "no match multiple conditions",
 			request: func() *http.Request {
-				body := map[string]interface{}{
+				body := map[string]any{
 					"Env": []interface{}{"DEBUG=true", "APP=test"},
-					"HostConfig": map[string]interface{}{
+					"HostConfig": map[string]any{
 						"Privileged": false,
 					},
 				}
@@ -323,9 +323,9 @@ func TestContainsMatching(t *testing.T) {
 			match: Match{
 				Path:   "/v1.*/containers/create",
 				Method: "POST",
-				Contains: map[string]interface{}{
+				Contains: map[string]any{
 					"Env": []interface{}{"DEBUG=true"},
-					"HostConfig": map[string]interface{}{
+					"HostConfig": map[string]any{
 						"Privileged": true,
 					},
 				},

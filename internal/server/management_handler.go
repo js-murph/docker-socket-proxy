@@ -449,7 +449,7 @@ func (h *ManagementHandler) cleanSockets(w http.ResponseWriter, r *http.Request)
 	// Return the result
 	if len(errs) > 0 {
 		w.WriteHeader(http.StatusInternalServerError)
-		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"status":  "error",
 			"message": "Failed to delete some sockets",
 			"errors":  errs,
@@ -462,7 +462,7 @@ func (h *ManagementHandler) cleanSockets(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"status":  "success",
 		"message": fmt.Sprintf("Deleted %d sockets", len(sockets)),
 	}); err != nil {

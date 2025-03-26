@@ -7,14 +7,14 @@ import (
 
 // MergeStructure merges an update structure into a body
 // If replace is true, it replaces existing values; otherwise, it adds to them
-func MergeStructure(body map[string]interface{}, update map[string]interface{}, replace bool) bool {
+func MergeStructure(body map[string]any, update map[string]any, replace bool) bool {
 	modified := false
 
 	for key, updateValue := range update {
 		// If the update value is a map, recurse into it
-		if updateMap, ok := updateValue.(map[string]interface{}); ok {
+		if updateMap, ok := updateValue.(map[string]any); ok {
 			if actualValue, exists := body[key]; exists {
-				if actualMap, ok := actualValue.(map[string]interface{}); ok {
+				if actualMap, ok := actualValue.(map[string]any); ok {
 					if MergeStructure(actualMap, updateMap, replace) {
 						modified = true
 					}
@@ -145,7 +145,7 @@ func MergeStructure(body map[string]interface{}, update map[string]interface{}, 
 }
 
 // DeleteMatchingFields deletes fields that match a structure
-func DeleteMatchingFields(body map[string]interface{}, match map[string]interface{}) bool {
+func DeleteMatchingFields(body map[string]any, match map[string]any) bool {
 	modified := false
 
 	for key, matchValue := range match {
@@ -155,8 +155,8 @@ func DeleteMatchingFields(body map[string]interface{}, match map[string]interfac
 		}
 
 		// If the match value is a map, recurse into it
-		if matchMap, ok := matchValue.(map[string]interface{}); ok {
-			if actualMap, ok := actualValue.(map[string]interface{}); ok {
+		if matchMap, ok := matchValue.(map[string]any); ok {
+			if actualMap, ok := actualValue.(map[string]any); ok {
 				if DeleteMatchingFields(actualMap, matchMap) {
 					modified = true
 				}
@@ -245,8 +245,8 @@ func isReplacementCandidate(actual, update interface{}) bool {
 	}
 
 	// For maps, check if they have the same key structure
-	if actualMap, ok := actual.(map[string]interface{}); ok {
-		if updateMap, ok := update.(map[string]interface{}); ok {
+	if actualMap, ok := actual.(map[string]any); ok {
+		if updateMap, ok := update.(map[string]any); ok {
 			// Check if they have at least one matching key-value pair
 			for key, updateVal := range updateMap {
 				if actualVal, exists := actualMap[key]; exists {
