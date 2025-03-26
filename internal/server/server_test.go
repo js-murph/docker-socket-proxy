@@ -376,9 +376,13 @@ func TestApplyRewriteRules(t *testing.T) {
 				},
 			}
 
-			err := s.applyRewriteRules(tt.request, "test")
+			handler := NewProxyHandler("/tmp/docker.sock", s.socketConfigs, &sync.RWMutex{})
+			allowed, reason, err := handler.processRules(tt.request, tt.config)
 			if err != nil {
-				t.Fatalf("applyRewriteRules() error = %v", err)
+				t.Fatalf("processRules() error = %v", err)
+			}
+			if !allowed {
+				t.Fatalf("processRules() denied request: %s", reason)
 			}
 
 			if tt.wantModified {

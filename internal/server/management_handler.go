@@ -190,13 +190,6 @@ func (h *ManagementHandler) CreateSocketHandler(w http.ResponseWriter, r *http.R
 	// Create a server for the socket
 	server := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Apply rewrite rules if needed
-			if srv != nil {
-				if err := srv.applyRewriteRules(r, socketPath); err != nil {
-					log.Error("Failed to apply rewrite rules", "error", err)
-				}
-			}
-
 			// Serve the request
 			proxyHandler.ServeHTTPWithSocket(w, r, socketPath)
 		}),

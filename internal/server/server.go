@@ -216,20 +216,14 @@ func (s *Server) loadExistingConfigs() error {
 		// Create a server for the socket
 		server := &http.Server{
 			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Check ACL rules first - if allowed, then apply rewrites and forward
 				s.configMu.RLock()
 				socketConfig, ok := s.socketConfigs[socketPath]
 				s.configMu.RUnlock()
 
 				if ok && socketConfig != nil {
-					// Apply rewrite rules before ACL check
-					if err := s.applyRewriteRules(r, socketPath); err != nil {
-						log.Error("Failed to apply rewrite rules", "error", err)
-					}
+					// Serve the request
+					proxyHandler.ServeHTTPWithSocket(w, r, socketPath)
 				}
-
-				// Serve the request
-				proxyHandler.ServeHTTPWithSocket(w, r, socketPath)
 			}),
 		}
 

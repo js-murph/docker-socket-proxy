@@ -57,8 +57,14 @@ func (h *ProxyHandler) ServeHTTPWithSocket(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Check if the request is allowed by the ACLs
-	allowed, reason := h.checkACLRules(r, socketConfig)
+	// Process rules and apply rewrites in a single pass
+	allowed, reason, err := h.processRules(r, socketConfig)
+	if err != nil {
+		log.Error("Error processing rules", "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
 	if !allowed {
 		log.Warn("Request denied by ACL",
 			"method", r.Method,
@@ -73,7 +79,6 @@ func (h *ProxyHandler) ServeHTTPWithSocket(w http.ResponseWriter, r *http.Reques
 	// Create a reverse proxy
 	proxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
-			// The URL will be used by the transport
 			req.URL.Scheme = "http"
 			req.URL.Host = "docker"
 		},
@@ -84,59 +89,156 @@ func (h *ProxyHandler) ServeHTTPWithSocket(w http.ResponseWriter, r *http.Reques
 		},
 	}
 
-	// Serve the request
 	proxy.ServeHTTP(w, r)
 }
 
-// checkACLRules checks if a request is allowed by the ACLs
-func (h *ProxyHandler) checkACLRules(r *http.Request, socketConfig *config.SocketConfig) (bool, string) {
+// processRules handles both ACL checks and rewrites in a single pass
+func (h *ProxyHandler) processRules(r *http.Request, socketConfig *config.SocketConfig) (allowed bool, reason string, err error) {
 	log := logging.GetLogger()
 
 	// Handle nil config - allow by default
 	if socketConfig == nil {
-		log.Info("No socket configuration found, allowing by default")
-		return true, ""
+		return true, "", nil
 	}
-
-	path := r.URL.Path
-	method := r.Method
-
-	log.Info("Checking ACL rules", "path", path, "method", method, "num_rules", len(socketConfig.Rules))
 
 	// If there are no rules, allow by default
 	if len(socketConfig.Rules) == 0 {
-		log.Info("No rules found, allowing by default")
-		return true, ""
+		return true, "", nil
 	}
 
-	// Check each rule in order
-	for i, rule := range socketConfig.Rules {
-		log.Info("Checking rule", "index", i, "path", rule.Match.Path, "method", rule.Match.Method)
+	// For POST/PUT requests that might need rewrites
+	var bodyBytes []byte
+	var body map[string]interface{}
+	modified := false
 
-		// Check if the rule matches
-		if !h.ruleMatches(r, rule.Match) {
+	if r.Method == "POST" || r.Method == "PUT" && r.Body != nil {
+		// Read the body
+		bodyBytes, err = io.ReadAll(r.Body)
+		if err != nil {
+			return false, "", fmt.Errorf("failed to read request body: %w", err)
+		}
+
+		// Create a new reader for the body immediately
+		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+
+		// Try to parse JSON body
+		if err := json.Unmarshal(bodyBytes, &body); err != nil {
+			// If we can't parse JSON, that's ok - we'll just use the original body
+			body = nil
+		}
+	}
+
+	// Process each rule in order
+	for _, rule := range socketConfig.Rules {
+		// Check path and method matches
+		pathMatches := true
+		if rule.Match.Path != "" {
+			pathMatches, err = regexp.MatchString(rule.Match.Path, r.URL.Path)
+			if err != nil {
+				return false, "", fmt.Errorf("invalid path pattern: %w", err)
+			}
+		}
+		if !pathMatches {
+			log.Debug("Path does not match", "path", r.URL.Path, "pattern", rule.Match.Path)
 			continue
 		}
 
-		// Rule matched, process actions in order
-		log.Info("Rule match result", "index", i, "matched", true,
-			"path_pattern", rule.Match.Path, "method_pattern", rule.Match.Method)
-
-		for _, action := range rule.Actions {
-			if action.Action == "allow" {
-				log.Info("Allow action found", "reason", action.Reason)
-				return true, action.Reason
-			} else if action.Action == "deny" {
-				log.Info("Deny action found", "reason", action.Reason)
-				return false, action.Reason
+		methodMatches := true
+		if rule.Match.Method != "" {
+			methodMatches, err = regexp.MatchString(rule.Match.Method, r.Method)
+			if err != nil {
+				return false, "", fmt.Errorf("invalid method pattern: %w", err)
 			}
-			// Continue with next action if not allow/deny
+		}
+		if !methodMatches {
+			log.Debug("Method does not match", "method", r.Method, "pattern", rule.Match.Method)
+			continue
+		}
+
+		// Check rule's Contains condition
+		if len(rule.Match.Contains) > 0 {
+			if body == nil {
+				log.Debug("No body available for Contains check")
+				continue
+			}
+			if !config.MatchValue(rule.Match.Contains, body) {
+				log.Debug("Body does not match Contains condition", "contains", rule.Match.Contains)
+				continue
+			}
+		}
+
+		log.Debug("Rule matched", "path", r.URL.Path, "method", r.Method)
+
+		// Rule matches, now process its actions
+		for _, action := range rule.Actions {
+			switch action.Action {
+			case "deny":
+				if len(action.Contains) > 0 && body != nil {
+					if !config.MatchValue(action.Contains, body) {
+						continue
+					}
+				}
+				return false, action.Reason, nil
+
+			case "allow":
+				if modified && body != nil {
+					// Update the body if it was modified
+					newBodyBytes, err := json.Marshal(body)
+					if err != nil {
+						return false, "", fmt.Errorf("failed to marshal modified body: %w", err)
+					}
+					r.Body = io.NopCloser(bytes.NewBuffer(newBodyBytes))
+					r.ContentLength = int64(len(newBodyBytes))
+					r.Header.Set("Content-Length", strconv.Itoa(len(newBodyBytes)))
+				} else {
+					// Restore original body
+					r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+					r.ContentLength = int64(len(bodyBytes))
+					r.Header.Set("Content-Length", strconv.Itoa(len(bodyBytes)))
+				}
+				return true, action.Reason, nil
+
+			case "replace":
+				if body != nil && config.MatchesStructure(body, action.Contains) {
+					if config.MergeStructure(body, action.Update, true) {
+						modified = true
+					}
+				}
+
+			case "upsert":
+				if body != nil {
+					if config.MergeStructure(body, action.Update, false) {
+						modified = true
+					}
+				}
+
+			case "delete":
+				if body != nil {
+					if config.DeleteMatchingFields(body, action.Contains) {
+						modified = true
+					}
+				}
+			}
 		}
 	}
 
-	// If no rule matches, allow by default
-	log.Info("No matching rules found, allowing by default")
-	return true, ""
+	// If we get here, no explicit allow/deny was found
+	// Restore the body and allow by default
+	if modified && body != nil {
+		newBodyBytes, err := json.Marshal(body)
+		if err != nil {
+			return false, "", fmt.Errorf("failed to marshal modified body: %w", err)
+		}
+		r.Body = io.NopCloser(bytes.NewBuffer(newBodyBytes))
+		r.ContentLength = int64(len(newBodyBytes))
+		r.Header.Set("Content-Length", strconv.Itoa(len(newBodyBytes)))
+	} else if bodyBytes != nil {
+		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+		r.ContentLength = int64(len(bodyBytes))
+		r.Header.Set("Content-Length", strconv.Itoa(len(bodyBytes)))
+	}
+
+	return true, "", nil
 }
 
 // ruleMatches checks if a request matches a rule
@@ -201,106 +303,4 @@ func (h *ProxyHandler) ruleMatches(r *http.Request, match config.Match) bool {
 	}
 
 	return true
-}
-
-// applyRewriteRules applies rewrite rules to a request
-func (s *Server) applyRewriteRules(r *http.Request, socketPath string) error {
-	s.configMu.RLock()
-	socketConfig, ok := s.socketConfigs[socketPath]
-	s.configMu.RUnlock()
-
-	if !ok || socketConfig == nil {
-		return nil // No config, no rewrites
-	}
-
-	// Only apply rewrites to POST requests that might have a body
-	if r.Method != "POST" {
-		return nil
-	}
-
-	// Read the request body
-	if r.Body == nil {
-		return nil
-	}
-
-	bodyBytes, err := io.ReadAll(r.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read request body: %w", err)
-	}
-	r.Body.Close()
-
-	// Parse the JSON body
-	var body map[string]interface{}
-	if err := json.Unmarshal(bodyBytes, &body); err != nil {
-		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes)) // Restore the original body
-		return nil                                        // Not a JSON body, skip rewrites
-	}
-
-	// Check each rule in order
-	modified := false
-	for _, rule := range socketConfig.Rules {
-		// Check if the rule matches
-		if !config.MatchesRule(r, rule.Match) {
-			continue
-		}
-
-		// Process actions in order
-		for _, action := range rule.Actions {
-			// If we find an allow/deny action, stop processing
-			if action.Action == "allow" || action.Action == "deny" {
-				// Restore the original body and return
-				r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-
-				// If body was modified, apply changes before returning
-				if modified {
-					newBodyBytes, err := json.Marshal(body)
-					if err == nil {
-						r.Body = io.NopCloser(bytes.NewBuffer(newBodyBytes))
-						r.ContentLength = int64(len(newBodyBytes))
-						r.Header.Set("Content-Length", strconv.Itoa(len(newBodyBytes)))
-					}
-				}
-
-				return nil
-			}
-
-			// Apply rewrite actions
-			switch action.Action {
-			case "replace":
-				if config.MatchesStructure(body, action.Contains) {
-					if config.MergeStructure(body, action.Update, true) {
-						modified = true
-					}
-				}
-			case "upsert":
-				if config.MergeStructure(body, action.Update, false) {
-					modified = true
-				}
-			case "delete":
-				if config.DeleteMatchingFields(body, action.Contains) {
-					modified = true
-				}
-			}
-		}
-	}
-
-	// If the body was modified, update the request
-	if modified {
-		// Marshal the modified body back to JSON
-		newBodyBytes, err := json.Marshal(body)
-		if err != nil {
-			r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes)) // Restore the original body
-			return fmt.Errorf("failed to marshal modified body: %w", err)
-		}
-
-		// Update the request body and Content-Length header
-		r.Body = io.NopCloser(bytes.NewBuffer(newBodyBytes))
-		r.ContentLength = int64(len(newBodyBytes))
-		r.Header.Set("Content-Length", strconv.Itoa(len(newBodyBytes)))
-	} else {
-		// Restore the original body
-		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-	}
-
-	return nil
 }
