@@ -75,8 +75,8 @@ func TestValidateConfig(t *testing.T) {
 func TestMatchValue(t *testing.T) {
 	tests := []struct {
 		name    string
-		pattern interface{}
-		value   interface{}
+		pattern any
+		value   any
 		want    bool
 	}{
 		{
@@ -287,8 +287,8 @@ func TestValidateACLRuleWithRegex(t *testing.T) {
 func TestContainsValue(t *testing.T) {
 	tests := []struct {
 		name     string
-		actual   interface{}
-		expected interface{}
+		actual   any
+		expected any
 		want     bool
 	}{
 		{

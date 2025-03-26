@@ -11,7 +11,7 @@ import (
 )
 
 // MatchValue checks if a value matches an expected value
-func MatchValue(expected, actual interface{}) bool {
+func MatchValue(expected, actual any) bool {
 	// Handle nil values
 	if expected == nil && actual == nil {
 		return true
@@ -42,7 +42,7 @@ func MatchValue(expected, actual interface{}) bool {
 }
 
 // matchStringValue handles string matching against various types
-func matchStringValue(expected string, actual interface{}) bool {
+func matchStringValue(expected string, actual any) bool {
 	switch act := actual.(type) {
 	case string:
 		return matchString(expected, act)
@@ -104,7 +104,7 @@ func matchArrayValue(expected, actual []any) bool {
 }
 
 // findItemInArray looks for an item in an array
-func findItemInArray(expected interface{}, actual []any) bool {
+func findItemInArray(expected any, actual []any) bool {
 	expStr, isExpStr := expected.(string)
 	for _, actItem := range actual {
 		actStr, isActStr := actItem.(string)

@@ -39,7 +39,7 @@ func handleResponse(resp *http.Response, expectedStatus int) ([]byte, error) {
 }
 
 // exitWithError prints an error message and exits with code 1
-func exitWithError(format string, args ...interface{}) {
+func exitWithError(format string, args ...any) {
 	fmt.Printf(format+"\n", args...)
 	osExit(1)
 }

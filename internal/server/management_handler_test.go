@@ -513,7 +513,7 @@ func TestManagementHandler_DescribeSocket(t *testing.T) {
 			}
 
 			// Check the response body
-			var expected, actual interface{}
+			var expected, actual any
 			if err := json.Unmarshal([]byte(tt.wantContent), &expected); err != nil {
 				t.Fatalf("Failed to parse expected JSON: %v", err)
 			}

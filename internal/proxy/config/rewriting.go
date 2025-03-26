@@ -19,7 +19,7 @@ func MergeStructure(body map[string]any, update map[string]any, replace bool) bo
 }
 
 // mergeValue handles merging a single value into the body
-func mergeValue(body map[string]any, key string, updateValue interface{}, replace bool) bool {
+func mergeValue(body map[string]any, key string, updateValue any, replace bool) bool {
 	switch v := updateValue.(type) {
 	case map[string]any:
 		return mergeMap(body, key, v, replace)
@@ -164,7 +164,7 @@ func upsertSimpleArray(body map[string]any, key string, actualArray, updateArray
 }
 
 // mergeSimpleValue handles merging a simple value
-func mergeSimpleValue(body map[string]any, key string, updateValue interface{}, replace bool) bool {
+func mergeSimpleValue(body map[string]any, key string, updateValue any, replace bool) bool {
 	if _, exists := body[key]; !exists || replace {
 		body[key] = updateValue
 		return true
@@ -186,7 +186,7 @@ func DeleteMatchingFields(body map[string]any, match map[string]any) bool {
 }
 
 // deleteValue handles deleting a single value based on its type
-func deleteValue(body map[string]any, key string, matchValue interface{}) bool {
+func deleteValue(body map[string]any, key string, matchValue any) bool {
 	_, exists := body[key]
 	if !exists {
 		return false
@@ -251,7 +251,7 @@ func deleteArray(body map[string]any, key string, matchArray []any) bool {
 }
 
 // shouldDeleteItem checks if an item should be deleted based on match criteria
-func shouldDeleteItem(item interface{}, matchArray []any) bool {
+func shouldDeleteItem(item any, matchArray []any) bool {
 	for _, matchItem := range matchArray {
 		if MatchValue(matchItem, item) {
 			return true
@@ -261,7 +261,7 @@ func shouldDeleteItem(item interface{}, matchArray []any) bool {
 }
 
 // deleteSimpleValue handles deleting simple values
-func deleteSimpleValue(body map[string]any, key string, matchValue interface{}) bool {
+func deleteSimpleValue(body map[string]any, key string, matchValue any) bool {
 	if MatchValue(matchValue, body[key]) {
 		delete(body, key)
 		return true
@@ -289,7 +289,7 @@ func isKeyValueArray(arr []any) bool {
 }
 
 // isReplacementCandidate determines if an actual item should be replaced by an update item
-func isReplacementCandidate(actual, update interface{}) bool {
+func isReplacementCandidate(actual, update any) bool {
 	// For strings, check if they have the same prefix before "="
 	if actualStr, ok := actual.(string); ok {
 		if updateStr, ok := update.(string); ok {
