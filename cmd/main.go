@@ -24,6 +24,8 @@ func main() {
 		Short: "A proxy for Docker socket management",
 	}
 
+	rootCmd.PersistentFlags().String("output", "yaml", "Output format (text|json|yaml|silent)")
+
 	var daemonCmd = &cobra.Command{
 		Use:   "daemon",
 		Short: "Run the proxy server daemon",
@@ -72,7 +74,7 @@ func main() {
 		Use:   "list",
 		Short: "List available proxy sockets",
 		Run: func(cmd *cobra.Command, args []string) {
-			cli.RunList(paths)
+			cli.RunList(cmd, paths)
 		},
 	}
 

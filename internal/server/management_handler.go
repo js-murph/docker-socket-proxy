@@ -210,12 +210,12 @@ func (h *ManagementHandler) CreateSocketHandler(w http.ResponseWriter, r *http.R
 
 	// Return the socket path
 	w.Header().Set("Content-Type", "application/json")
-	response := struct {
-		SocketPath string `json:"socket_path"`
-	}{
-		SocketPath: socketPath,
+	response := management.Response[management.CreateResponse]{
+		Status: "success",
+		Response: management.CreateResponse{
+			Socket: socketPath,
+		},
 	}
-
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Error("Failed to encode response", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -251,8 +251,18 @@ func (h *ManagementHandler) handleDeleteSocket(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "Socket %s deleted successfully", socketPath)
+	w.Header().Set("Content-Type", "application/json")
+	response := management.Response[management.DeleteResponse]{
+		Status: "success",
+		Response: management.DeleteResponse{
+			Message: fmt.Sprintf("Socket %s deleted successfully", socketPath),
+		},
+	}
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Error("Failed to encode response", "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
 }
 
 // deleteSocket handles the actual deletion of a socket and its resources
@@ -336,54 +346,80 @@ func (h *ManagementHandler) handleListSockets(w http.ResponseWriter, r *http.Req
 
 	// Return the list of sockets
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(sockets); err != nil {
+	response := management.Response[management.ListResponse]{
+		Status: "success",
+		Response: management.ListResponse{
+			Sockets: sockets,
+		},
+	}
+	if err := json.NewEncoder(w).Encode(response); err != nil {
 		log.Error("Failed to encode response", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 }
 
-// handleDescribeSocket returns the configuration for a socket
+// handleDescribeSocket handles requests to describe a socket's configuration
 func (h *ManagementHandler) handleDescribeSocket(w http.ResponseWriter, r *http.Request) {
 	log := logging.GetLogger()
 
-	// Get the socket path from the query string
-	socketPath := r.URL.Query().Get("socket")
-	if socketPath == "" {
+	// Get the socket path from the query parameters
+	socketName := r.URL.Query().Get("socket")
+	if socketName == "" {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		if err := json.NewEncoder(w).Encode(map[string]string{"error": "socket parameter is required"}); err != nil {
+		response := management.Response[management.ErrorResponse]{
+			Status: "error",
+			Response: management.ErrorResponse{
+				Error: "socket parameter is required",
+			},
+		}
+		if err := json.NewEncoder(w).Encode(response); err != nil {
 			log.Error("Failed to encode error response", "error", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
 		}
 		return
 	}
 
+	socketPath := h.resolveSocketPath(r, socketName)
 	log.Info("Describing socket", "path", socketPath)
 
-	// Get the socket configuration
+	// Get the configuration for the socket
 	h.configMu.RLock()
-	config, ok := h.socketConfigs[socketPath]
+	socketConfig, exists := h.socketConfigs[socketPath]
 	h.configMu.RUnlock()
 
-	if !ok {
+	if !exists {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		if err := json.NewEncoder(w).Encode(map[string]string{"error": "socket not found"}); err != nil {
+		response := management.Response[management.ErrorResponse]{
+			Status: "error",
+			Response: management.ErrorResponse{
+				Error: "socket not found",
+			},
+		}
+		if err := json.NewEncoder(w).Encode(response); err != nil {
 			log.Error("Failed to encode error response", "error", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
 		}
 		return
 	}
 
-	// Return the configuration as JSON
+	// Return the socket configuration
+	response := management.Response[management.DescribeResponse]{
+		Status: "success",
+		Response: management.DescribeResponse{
+			Config: socketConfig,
+		},
+	}
+
+	// Set headers and write response
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(config); err != nil {
-		log.Error("Failed to encode socket configuration", "error", err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		if err := json.NewEncoder(w).Encode(map[string]string{"error": "internal server error"}); err != nil {
-			log.Error("Failed to encode error response", "error", err)
-		}
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Error("Failed to encode response", "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 }

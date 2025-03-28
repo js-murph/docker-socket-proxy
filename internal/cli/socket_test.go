@@ -58,8 +58,15 @@ func TestRunCreate(t *testing.T) {
 			}
 		}
 
-		_, err := w.Write([]byte("/var/run/docker-proxy/test-socket.sock"))
-		if err != nil {
+		// Return a proper JSON response
+		w.Header().Set("Content-Type", "application/json")
+		response := management.Response[management.CreateResponse]{
+			Status: "success",
+			Response: management.CreateResponse{
+				Socket: "/var/run/docker-proxy/test-socket.sock",
+			},
+		}
+		if err := json.NewEncoder(w).Encode(response); err != nil {
 			t.Errorf("Failed to write response: %v", err)
 		}
 	}))
@@ -70,6 +77,7 @@ func TestRunCreate(t *testing.T) {
 	// Set up test command and arguments
 	cmd := &cobra.Command{}
 	cmd.Flags().String("config", "", "")
+	cmd.Flags().String("output", "text", "")
 	paths := &management.SocketPaths{
 		Management: socketPath,
 	}
@@ -113,8 +121,16 @@ func TestRunDelete(t *testing.T) {
 			t.Errorf("Expected Socket-Path header to be /var/run/test-socket.sock, got %s",
 				r.Header.Get("Socket-Path"))
 		}
-		_, err := w.Write([]byte("Socket deleted successfully"))
-		if err != nil {
+
+		// Return a proper JSON response
+		w.Header().Set("Content-Type", "application/json")
+		response := management.Response[management.DeleteResponse]{
+			Status: "success",
+			Response: management.DeleteResponse{
+				Message: "Socket deleted successfully",
+			},
+		}
+		if err := json.NewEncoder(w).Encode(response); err != nil {
 			t.Errorf("Failed to write response: %v", err)
 		}
 	}))
@@ -124,6 +140,7 @@ func TestRunDelete(t *testing.T) {
 
 	// Set up test command and arguments
 	cmd := &cobra.Command{}
+	cmd.Flags().String("output", "text", "")
 	args := []string{"/var/run/test-socket.sock"}
 	paths := &management.SocketPaths{
 		Management: socketPath,
@@ -165,10 +182,15 @@ func TestRunList(t *testing.T) {
 			t.Errorf("Expected /socket/list path, got %s", r.URL.Path)
 		}
 
-		// Return a list of sockets
+		// Return a proper JSON response
 		w.Header().Set("Content-Type", "application/json")
-		_, err := w.Write([]byte(`["socket1.sock", "socket2.sock"]`))
-		if err != nil {
+		response := management.Response[management.ListResponse]{
+			Status: "success",
+			Response: management.ListResponse{
+				Sockets: []string{"socket1.sock", "socket2.sock"},
+			},
+		}
+		if err := json.NewEncoder(w).Encode(response); err != nil {
 			t.Errorf("Failed to write response: %v", err)
 		}
 	}))
@@ -181,9 +203,13 @@ func TestRunList(t *testing.T) {
 		Management: socketPath,
 	}
 
+	// Set up test command
+	cmd := &cobra.Command{}
+	cmd.Flags().String("output", "text", "")
+
 	// Capture stdout
 	output := captureOutput(func() {
-		RunList(paths)
+		RunList(cmd, paths)
 	})
 
 	// Check output
@@ -221,16 +247,27 @@ func TestRunDescribe(t *testing.T) {
 				r.URL.Query().Get("socket"))
 		}
 
-		// Return a YAML config
-		w.Header().Set("Content-Type", "application/yaml")
-		w.WriteHeader(http.StatusOK)
-		_, err := w.Write([]byte(`rules:
-  acls:
-  - match:
-      path: /test
-      method: GET
-    action: allow`))
-		if err != nil {
+		// Return a proper JSON response
+		w.Header().Set("Content-Type", "application/json")
+		response := management.Response[management.DescribeResponse]{
+			Status: "success",
+			Response: management.DescribeResponse{
+				Config: map[string]interface{}{
+					"rules": map[string]interface{}{
+						"acls": []map[string]interface{}{
+							{
+								"match": map[string]interface{}{
+									"path":   "/test",
+									"method": "GET",
+								},
+								"action": "allow",
+							},
+						},
+					},
+				},
+			},
+		}
+		if err := json.NewEncoder(w).Encode(response); err != nil {
 			t.Errorf("Failed to write response: %v", err)
 		}
 	}))
@@ -240,6 +277,7 @@ func TestRunDescribe(t *testing.T) {
 
 	// Set up test command and arguments
 	cmd := &cobra.Command{}
+	cmd.Flags().String("output", "text", "")
 	args := []string{"test-socket.sock"}
 	paths := &management.SocketPaths{
 		Management: socketPath,
