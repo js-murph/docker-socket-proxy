@@ -50,21 +50,19 @@ func (o *Output) Print(data any) error {
 }
 
 // Error prints error messages
-func (o *Output) Error(err error) error {
+func (o *Output) Error(err error) {
 	if o.format == FormatSilent {
-		return nil
+		return
 	}
-	_, err = fmt.Fprintf(o.writer, "Error: %v\n", err)
-	return err
+	_, _ = fmt.Fprintf(o.writer, "Error: %v\n", err)
 }
 
 // Success prints success messages
-func (o *Output) Success(msg string) error {
+func (o *Output) Success(msg string) {
 	if o.format == FormatSilent {
-		return nil
+		return
 	}
-	_, err := fmt.Fprintf(o.writer, "Success: %s\n", msg)
-	return err
+	_, _ = fmt.Fprintf(o.writer, "Success: %s\n", msg)
 }
 
 // PrintText prints data in text format
