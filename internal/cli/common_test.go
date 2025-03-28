@@ -10,14 +10,16 @@ import (
 	"testing"
 )
 
-// captureOutput captures stdout during a function execution
+// captureOutput captures stdout and stderr during a function execution
 func captureOutput(f func()) string {
-	// Save the original stdout
+	// Save the original stdout and stderr
 	oldStdout := os.Stdout
+	oldStderr := os.Stderr
 
 	// Create a pipe
 	r, w, _ := os.Pipe()
 	os.Stdout = w
+	os.Stderr = w
 
 	// Call the function
 	f()
@@ -25,8 +27,9 @@ func captureOutput(f func()) string {
 	// Close the write end of the pipe to flush it
 	w.Close()
 
-	// Restore the original stdout
+	// Restore the original stdout and stderr
 	os.Stdout = oldStdout
+	os.Stderr = oldStderr
 
 	// Read the output
 	var buf bytes.Buffer

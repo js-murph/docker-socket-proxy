@@ -43,35 +43,9 @@ func (o *Output) Print(data any) error {
 	case FormatYAML:
 		return yaml.NewEncoder(o.writer).Encode(data)
 	case FormatText:
-		return o.printText(data)
+		return o.PrintText(data.(string))
 	default:
 		return fmt.Errorf("unsupported output format: %s", o.format)
-	}
-}
-
-// printText handles text formatting
-func (o *Output) printText(data any) error {
-	switch v := data.(type) {
-	case string:
-		_, err := fmt.Fprintln(o.writer, v)
-		return err
-	case []string:
-		for _, s := range v {
-			if _, err := fmt.Fprintln(o.writer, s); err != nil {
-				return err
-			}
-		}
-		return nil
-	case map[string]any:
-		for k, v := range v {
-			if _, err := fmt.Fprintf(o.writer, "%s: %v\n", k, v); err != nil {
-				return err
-			}
-		}
-		return nil
-	default:
-		_, err := fmt.Fprintf(o.writer, "%v\n", data)
-		return err
 	}
 }
 
@@ -91,4 +65,18 @@ func (o *Output) Success(msg string) error {
 	}
 	_, err := fmt.Fprintf(o.writer, "Success: %s\n", msg)
 	return err
+}
+
+// PrintText prints data in text format
+func (o *Output) PrintText(text string) error {
+	if o.format == FormatSilent {
+		return nil
+	}
+	_, err := fmt.Fprintln(o.writer, text)
+	return err
+}
+
+// Writer returns the output writer
+func (o *Output) Writer() *os.File {
+	return o.writer
 }

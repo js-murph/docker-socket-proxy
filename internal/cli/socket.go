@@ -60,7 +60,19 @@ func RunCreate(cmd *cobra.Command, paths *management.SocketPaths) {
 		osExit(1)
 	}
 
-	out.Print(string(responseBody))
+	// Parse the JSON response
+	var response management.Response[management.CreateResponse]
+	if err := json.Unmarshal(responseBody, &response); err != nil {
+		errOut.Error(fmt.Errorf("Failed to parse response: %v", err))
+		osExit(1)
+	}
+
+	// Print in requested format
+	if format, _ := cmd.Flags().GetString("output"); format == "text" {
+		out.Print(response.Response.Socket)
+	} else {
+		out.Print(response.Response)
+	}
 }
 
 // RunDelete executes the socket delete command
@@ -102,13 +114,25 @@ func RunDelete(cmd *cobra.Command, args []string, paths *management.SocketPaths)
 	defer resp.Body.Close()
 
 	// Handle the response
-	_, err = handleResponse(resp, http.StatusOK)
+	responseBody, err := handleResponse(resp, http.StatusOK)
 	if err != nil {
 		errOut.Error(fmt.Errorf("Failed to delete socket: %v", err))
 		osExit(1)
 	}
 
-	out.Success(fmt.Sprintf("Socket %s deleted successfully", socketPath))
+	// Parse the JSON response
+	var response management.Response[management.DeleteResponse]
+	if err := json.Unmarshal(responseBody, &response); err != nil {
+		errOut.Error(fmt.Errorf("Failed to parse response: %v", err))
+		osExit(1)
+	}
+
+	// Print in requested format
+	if format, _ := cmd.Flags().GetString("output"); format == "text" {
+		out.Print(response.Response.Message)
+	} else {
+		out.Print(response.Response)
+	}
 }
 
 // RunDescribe executes the describe command
@@ -147,21 +171,28 @@ func RunDescribe(cmd *cobra.Command, args []string, paths *management.SocketPath
 	defer resp.Body.Close()
 
 	// Handle the response
-	body, err := handleResponse(resp, http.StatusOK)
+	responseBody, err := handleResponse(resp, http.StatusOK)
 	if err != nil {
 		errOut.Error(fmt.Errorf("Failed to describe socket: %v", err))
 		osExit(1)
 	}
 
-	// Parse the response as YAML
-	var config interface{}
-	if err := yaml.Unmarshal(body, &config); err != nil {
-		errOut.Error(fmt.Errorf("Error parsing YAML: %v", err))
+	// Parse the JSON response
+	var response management.Response[management.DescribeResponse]
+	if err := json.Unmarshal(responseBody, &response); err != nil {
+		errOut.Error(fmt.Errorf("Error parsing response: %v", err))
 		osExit(1)
 	}
 
-	// Print the configuration in the requested format
-	out.Print(config)
+	// Print in requested format
+	if format, _ := cmd.Flags().GetString("output"); format == "text" {
+		if err := yaml.NewEncoder(out.Writer()).Encode(response.Response.Config); err != nil {
+			errOut.Error(fmt.Errorf("Failed to encode config: %v", err))
+			osExit(1)
+		}
+	} else {
+		out.Print(response.Response)
+	}
 }
 
 // RunList executes the list command
@@ -188,21 +219,27 @@ func RunList(cmd *cobra.Command, paths *management.SocketPaths) {
 	defer resp.Body.Close()
 
 	// Handle the response
-	body, err := handleResponse(resp, http.StatusOK)
+	responseBody, err := handleResponse(resp, http.StatusOK)
 	if err != nil {
 		errOut.Error(fmt.Errorf("Failed to list sockets: %v", err))
 		osExit(1)
 	}
 
 	// Parse the response
-	var sockets []string
-	if err := json.Unmarshal(body, &sockets); err != nil {
+	var response management.Response[management.ListResponse]
+	if err := json.Unmarshal(responseBody, &response); err != nil {
 		errOut.Error(fmt.Errorf("Error parsing response: %v", err))
 		osExit(1)
 	}
 
-	// Print the sockets in the requested format
-	out.Print(sockets)
+	// Print in requested format
+	if format, _ := cmd.Flags().GetString("output"); format == "text" {
+		for _, socket := range response.Response.Sockets {
+			out.Print(socket)
+		}
+	} else {
+		out.Print(response.Response)
+	}
 }
 
 // RunClean executes the clean command

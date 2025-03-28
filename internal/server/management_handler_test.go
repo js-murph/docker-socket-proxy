@@ -83,19 +83,22 @@ func TestManagementHandler_CreateSocket(t *testing.T) {
 
 		// Parse the response
 		var response struct {
-			SocketPath string `json:"socket_path"`
+			Status   string `json:"status"`
+			Response struct {
+				Socket string `json:"socket"`
+			} `json:"response"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 			t.Fatalf("Failed to parse response: %v", err)
 		}
 
 		// Check if the socket was created
-		if _, err := os.Stat(response.SocketPath); os.IsNotExist(err) {
+		if _, err := os.Stat(response.Response.Socket); os.IsNotExist(err) {
 			t.Errorf("Socket was not created: %v", err)
 		}
 
 		// Check if the config file was created
-		_, err = store.LoadConfig(response.SocketPath)
+		_, err = store.LoadConfig(response.Response.Socket)
 		if err != nil {
 			t.Errorf("Socket config file was not created: %v", err)
 		}
@@ -151,19 +154,22 @@ func TestManagementHandler_CreateSocket(t *testing.T) {
 
 		// Parse the response
 		var response struct {
-			SocketPath string `json:"socket_path"`
+			Status   string `json:"status"`
+			Response struct {
+				Socket string `json:"socket"`
+			} `json:"response"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 			t.Fatalf("Failed to parse response: %v", err)
 		}
 
 		// Check if the socket was created
-		if _, err := os.Stat(response.SocketPath); os.IsNotExist(err) {
+		if _, err := os.Stat(response.Response.Socket); os.IsNotExist(err) {
 			t.Errorf("Socket was not created: %v", err)
 		}
 
 		// Check if the config file was created
-		_, err = store.LoadConfig(response.SocketPath)
+		_, err = store.LoadConfig(response.Response.Socket)
 		if err != nil {
 			t.Errorf("Socket config file was not created: %v", err)
 		}
@@ -350,27 +356,34 @@ func TestManagementHandler_ListSockets(t *testing.T) {
 			t.Errorf("ServeHTTP() status = %v, want %v", w.Code, http.StatusOK)
 		}
 
-		var sockets []string
-		if err := json.NewDecoder(w.Body).Decode(&sockets); err != nil {
+		var response struct {
+			Status   string `json:"status"`
+			Response struct {
+				Sockets []string `json:"sockets"`
+			} `json:"response"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
 			t.Errorf("Failed to decode response: %v", err)
 		}
 
-		if len(sockets) != 2 {
-			t.Errorf("Expected 2 sockets, got %d", len(sockets))
+		// Check the response
+		if response.Status != "success" {
+			t.Errorf("Expected status success, got %s", response.Status)
+		}
+		if len(response.Response.Sockets) != 2 {
+			t.Errorf("Expected 2 sockets, got %d", len(response.Response.Sockets))
 		}
 
-		// Check that we get just the filenames
-		expected := []string{"test1.sock", "test2.sock"}
-		for _, s := range expected {
-			found := false
-			for _, actual := range sockets {
-				if actual == s {
-					found = true
-					break
-				}
-			}
-			if !found {
-				t.Errorf("Expected socket %s not found in response", s)
+		// Check if the sockets are in the response
+		found := make(map[string]bool)
+		for _, socket := range response.Response.Sockets {
+			found[socket] = true
+		}
+
+		expectedSockets := []string{"test1.sock", "test2.sock"}
+		for _, expected := range expectedSockets {
+			if !found[expected] {
+				t.Errorf("Expected socket %s not found in response", expected)
 			}
 		}
 	})
@@ -409,6 +422,9 @@ func TestManagementHandler_DescribeSocket(t *testing.T) {
 
 	// Create a test config
 	testConfig := &config.SocketConfig{
+		Config: config.ConfigSet{
+			PropagateSocket: "",
+		},
 		Rules: []config.Rule{
 			{
 				Match: config.Match{
@@ -435,6 +451,14 @@ func TestManagementHandler_DescribeSocket(t *testing.T) {
 	// Create a file store
 	store := storage.NewFileStore(tmpDir)
 
+	// Create a server instance for the context
+	srv := &Server{
+		socketDir:     tmpDir,
+		store:         store,
+		socketConfigs: socketConfigs,
+		proxyServers:  make(map[string]*http.Server),
+	}
+
 	// Create a management handler using the constructor
 	handler := NewManagementHandler("/tmp/docker.sock", socketConfigs, &configMu, store)
 
@@ -450,7 +474,10 @@ func TestManagementHandler_DescribeSocket(t *testing.T) {
 			socketPath: "",
 			wantStatus: http.StatusBadRequest,
 			wantContent: `{
-				"error": "socket parameter is required"
+				"status": "error",
+				"response": {
+					"error": "socket parameter is required"
+				}
 			}`,
 		},
 		{
@@ -458,30 +485,38 @@ func TestManagementHandler_DescribeSocket(t *testing.T) {
 			socketPath: "nonexistent.sock",
 			wantStatus: http.StatusNotFound,
 			wantContent: `{
-				"error": "socket not found"
+				"status": "error",
+				"response": {
+					"error": "socket not found"
+				}
 			}`,
 		},
 		{
 			name:       "valid socket",
-			socketPath: socketPath,
+			socketPath: "test.sock",
 			wantStatus: http.StatusOK,
 			wantContent: `{
-				"config": {
-					"propagate_socket": ""
-				},
-				"rules": [
-					{
-						"match": {
-							"path": "/test",
-							"method": "GET"
+				"status": "success",
+				"response": {
+					"config": {
+						"config": {
+							"propagate_socket": ""
 						},
-						"actions": [
+						"rules": [
 							{
-								"action": "allow"
+								"match": {
+									"path": "/test",
+									"method": "GET"
+								},
+								"actions": [
+									{
+										"action": "allow"
+									}
+								]
 							}
 						]
 					}
-				]
+				}
 			}`,
 		},
 	}
@@ -495,6 +530,10 @@ func TestManagementHandler_DescribeSocket(t *testing.T) {
 			} else {
 				req, _ = http.NewRequest("GET", "/socket/describe?socket="+url.QueryEscape(tt.socketPath), nil)
 			}
+
+			// Add server to context
+			ctx := context.WithValue(req.Context(), serverContextKey, srv)
+			req = req.WithContext(ctx)
 
 			// Create a response recorder
 			rr := httptest.NewRecorder()
@@ -512,17 +551,17 @@ func TestManagementHandler_DescribeSocket(t *testing.T) {
 				t.Errorf("Expected Content-Type application/json, got %s", contentType)
 			}
 
-			// Check the response body
-			var expected, actual any
+			// Compare the JSON content
+			var expected, actual interface{}
 			if err := json.Unmarshal([]byte(tt.wantContent), &expected); err != nil {
 				t.Fatalf("Failed to parse expected JSON: %v", err)
 			}
 			if err := json.Unmarshal(rr.Body.Bytes(), &actual); err != nil {
-				t.Fatalf("Failed to parse actual response: %v", err)
+				t.Fatalf("Failed to parse actual JSON: %v", err)
 			}
 
 			if !reflect.DeepEqual(expected, actual) {
-				t.Errorf("Response doesn't contain expected JSON content: %s", rr.Body.String())
+				t.Errorf("Response doesn't match expected JSON content:\nExpected: %s\nGot: %s", tt.wantContent, rr.Body.String())
 			}
 		})
 	}
@@ -758,36 +797,13 @@ func TestManagementHandler(t *testing.T) {
 func createTestConfig() *config.SocketConfig {
 	return &config.SocketConfig{
 		Config: config.ConfigSet{
-			PropagateSocket: "/var/run/docker.sock",
+			PropagateSocket: "",
 		},
 		Rules: []config.Rule{
 			{
 				Match: config.Match{
-					Path:   "/v1.*/containers/json",
+					Path:   "/test",
 					Method: "GET",
-				},
-				Actions: []config.Action{
-					{
-						Action: "allow",
-					},
-				},
-			},
-			{
-				Match: config.Match{
-					Path:   "/v1.*/containers/create",
-					Method: "POST",
-				},
-				Actions: []config.Action{
-					{
-						Action: "deny",
-						Reason: "Test deny rule", // Add reason for deny rule
-					},
-				},
-			},
-			{
-				Match: config.Match{
-					Path:   "/.*",
-					Method: ".*",
 				},
 				Actions: []config.Action{
 					{
