@@ -181,9 +181,13 @@ func TestRunList(t *testing.T) {
 		Management: socketPath,
 	}
 
+	// Set up test command
+	cmd := &cobra.Command{}
+	cmd.Flags().String("output", "text", "")
+
 	// Capture stdout
 	output := captureOutput(func() {
-		RunList(paths)
+		RunList(cmd, paths)
 	})
 
 	// Check output
