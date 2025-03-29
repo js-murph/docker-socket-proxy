@@ -62,6 +62,7 @@ docker-socket-proxy socket create [flags]
 
 ```
 --config, -c string   Path to socket configuration file (yaml)
+--output              Output format, options are: yaml, json, text, silent (defaults to yaml)
 ```
 
 ### Example
