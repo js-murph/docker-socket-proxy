@@ -18,24 +18,34 @@ version:
 	@echo "Creating a new version..."
 	@echo "Current version: $$(svu current)"
 	@echo "Next version: $$(svu next)"
-	@read -p "Continue with this version? [y/N] " confirm; \
-	if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
+	@if [ "$$CI" = "true" ]; then \
 		echo "Creating git tag for version $$(svu next)"; \
 		git tag -a $$(svu next) -m "Release $$(svu next)"; \
 		git push origin $$(svu next); \
 	else \
-		echo "Release cancelled"; \
+		read -p "Continue with this version? [y/N] " confirm; \
+		if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
+			echo "Creating git tag for version $$(svu next)"; \
+			git tag -a $$(svu next) -m "Release $$(svu next)"; \
+			git push origin $$(svu next); \
+		else \
+			echo "Release cancelled"; \
+		fi \
 	fi
 
 release:
 	@echo "Creating a new release for $$(svu current)..."
-	@read -p "Continue with this version? [y/N] " confirm; \
-	if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
+	@if [ "$$CI" = "true" ]; then \
 		echo "Running goreleaser..."; \
 		goreleaser release --clean; \
-		echo "Release $$(svu current) completed successfully!"; \
 	else \
-		echo "Release cancelled"; \
+		read -p "Continue with this version? [y/N] " confirm; \
+		if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
+			echo "Running goreleaser..."; \
+			goreleaser release --clean; \
+		else \
+			echo "Release cancelled"; \
+		fi \
 	fi
 
 release-docs:
