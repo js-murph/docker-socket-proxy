@@ -8,16 +8,26 @@ import (
 )
 
 func TestNewSocketPaths(t *testing.T) {
-	paths := NewSocketPaths()
-
-	if paths.Management != DefaultManagementSocketPath {
-		t.Errorf("Expected Management path to be %s, got %s",
-			DefaultManagementSocketPath, paths.Management)
+	tmpDir, err := os.MkdirTemp("/tmp", "docker-proxy-test-*")
+	if err != nil {
+		t.Fatal(err)
 	}
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
+	// Test with default paths
+	paths := NewSocketPaths()
+	if paths.Management != DefaultManagementSocketPath {
+		t.Errorf("Expected default management path, got %s", paths.Management)
+	}
 	if paths.Docker != DefaultDockerSocketPath {
-		t.Errorf("Expected Docker path to be %s, got %s",
-			DefaultDockerSocketPath, paths.Docker)
+		t.Errorf("Expected default docker path, got %s", paths.Docker)
+	}
+	if paths.SocketDir != DefaultSocketDir {
+		t.Errorf("Expected default socket dir, got %s", paths.SocketDir)
 	}
 }
 
@@ -27,7 +37,11 @@ func TestSocketPathsWithCustomPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	customPaths := &SocketPaths{
 		Management: filepath.Join(tmpDir, "mgmt.sock"),

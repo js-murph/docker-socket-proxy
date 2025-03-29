@@ -481,7 +481,11 @@ func (h *TestProxyHandler) ServeHTTPWithSocket(w http.ResponseWriter, r *http.Re
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Error("Failed to close response body", "error", err)
+		}
+	}()
 
 	// Copy the response headers
 	for k, v := range resp.Header {
