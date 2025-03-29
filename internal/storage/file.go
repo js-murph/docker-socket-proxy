@@ -150,7 +150,7 @@ func (s *FileStore) getFilename(socketPath string) string {
 	socketName := filepath.Base(socketPath)
 
 	// Replace slashes with underscores (in case the name itself contains slashes)
-	filename := strings.Replace(socketName, "/", "_", -1)
+	filename := strings.ReplaceAll(socketName, "/", "_")
 
 	// Add the .json extension
 	filename = filename + ".json"
