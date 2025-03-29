@@ -49,14 +49,17 @@ func (h *ProxyHandler) checkACLRules(r *http.Request, socketConfig *config.Socke
 			"path_pattern", rule.Match.Path, "method_pattern", rule.Match.Method)
 
 		for _, action := range rule.Actions {
-			if action.Action == "allow" {
+			switch action.Action {
+			case "allow":
 				log.Info("Allow action found", "reason", action.Reason)
 				return true, action.Reason
-			} else if action.Action == "deny" {
+			case "deny":
 				log.Info("Deny action found", "reason", action.Reason)
 				return false, action.Reason
+			default:
+				// Continue with next action if not allow/deny
+				continue
 			}
-			// Continue with next action if not allow/deny
 		}
 	}
 
@@ -109,8 +112,9 @@ func (h *ProxyHandler) ruleMatches(r *http.Request, match config.Match) bool {
 			log.Error("Error reading request body", "error", err)
 			return false
 		}
-
-		// Restore the request body
+		if err := r.Body.Close(); err != nil {
+			return false
+		}
 		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
 		// Parse the JSON body
@@ -153,7 +157,9 @@ func (s *Server) applyRewriteRules(r *http.Request, socketPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read request body: %w", err)
 	}
-	r.Body.Close()
+	if err := r.Body.Close(); err != nil {
+		return fmt.Errorf("failed to close request body: %w", err)
+	}
 
 	// Parse the JSON body
 	var body map[string]interface{}
@@ -256,7 +262,9 @@ func matchesRule(r *http.Request, match config.Match) bool {
 		if err != nil {
 			return false
 		}
-		r.Body.Close()
+		if err := r.Body.Close(); err != nil {
+			return false
+		}
 		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
 		// Parse the JSON body

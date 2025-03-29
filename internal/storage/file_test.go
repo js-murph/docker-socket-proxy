@@ -15,7 +15,14 @@ func TestFileStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() {
+		if err := os.RemoveAll(tempDir); err != nil {
+			t.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
+
+	// Create a new FileStore instance
+	store := NewFileStore(tempDir)
 
 	// Create test socket paths with unique names
 	testSocketName := "test.sock"
@@ -43,9 +50,6 @@ func TestFileStore(t *testing.T) {
 			},
 		},
 	}
-
-	// Create a file store
-	store := NewFileStore(tempDir)
 
 	// Test saving a config
 	t.Run("save_config", func(t *testing.T) {

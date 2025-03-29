@@ -23,7 +23,9 @@ func captureOutput(f func()) string {
 	f()
 
 	// Close the write end of the pipe to flush it
-	w.Close()
+	if err := w.Close(); err != nil {
+		panic(fmt.Sprintf("Failed to close pipe: %v", err))
+	}
 
 	// Restore the original stdout
 	os.Stdout = oldStdout

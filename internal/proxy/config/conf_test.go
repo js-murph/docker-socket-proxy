@@ -325,3 +325,56 @@ func TestValidateACLRuleWithRegex(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadConfig(t *testing.T) {
+	tmpfile, err := os.CreateTemp("", "config-*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Remove(tmpfile.Name()); err != nil {
+			t.Errorf("Failed to remove temporary file: %v", err)
+		}
+	}()
+
+	// Write test config
+	testConfig := `{
+		"rules": [
+			{
+				"match": {
+					"path": "/v1.*/containers",
+					"method": "GET"
+				},
+				"actions": [
+					{
+						"action": "allow"
+					}
+				]
+			}
+		]
+	}`
+	if _, err := tmpfile.Write([]byte(testConfig)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmpfile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test loading config
+	config, err := LoadSocketConfig(tmpfile.Name())
+	if err != nil {
+		t.Fatalf("LoadSocketConfig() error = %v", err)
+	}
+	if len(config.Rules) != 1 {
+		t.Errorf("Expected 1 rule, got %d", len(config.Rules))
+	}
+	if config.Rules[0].Match.Path != "/v1.*/containers" {
+		t.Errorf("Expected path /v1.*/containers, got %s", config.Rules[0].Match.Path)
+	}
+	if config.Rules[0].Match.Method != "GET" {
+		t.Errorf("Expected method GET, got %s", config.Rules[0].Match.Method)
+	}
+	if config.Rules[0].Actions[0].Action != "allow" {
+		t.Errorf("Expected action allow, got %s", config.Rules[0].Actions[0].Action)
+	}
+}
