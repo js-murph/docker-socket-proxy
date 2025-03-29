@@ -72,53 +72,11 @@ func TestValidateConfig(t *testing.T) {
 	}
 }
 
-func TestMatchPattern(t *testing.T) {
-	tests := []struct {
-		name    string
-		pattern string
-		value   string
-		want    bool
-	}{
-		{
-			name:    "exact match",
-			pattern: "test",
-			value:   "test",
-			want:    true,
-		},
-		{
-			name:    "wildcard match",
-			pattern: "test*",
-			value:   "testing",
-			want:    true,
-		},
-		{
-			name:    "no match",
-			pattern: "test",
-			value:   "other",
-			want:    false,
-		},
-		{
-			name:    "invalid pattern",
-			pattern: "[",
-			value:   "test",
-			want:    false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := MatchPattern(tt.pattern, tt.value); got != tt.want {
-				t.Errorf("MatchPattern() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestMatchValue(t *testing.T) {
 	tests := []struct {
 		name    string
-		pattern interface{}
-		value   interface{}
+		pattern any
+		value   any
 		want    bool
 	}{
 		{
@@ -135,8 +93,8 @@ func TestMatchValue(t *testing.T) {
 		},
 		{
 			name:    "array match",
-			pattern: []interface{}{"test*"},
-			value:   []interface{}{"testing"},
+			pattern: []any{"test*"},
+			value:   []any{"testing"},
 			want:    true,
 		},
 		{
@@ -223,13 +181,13 @@ func TestLoadSocketConfig(t *testing.T) {
 }
 
 func TestGetPropagationRules(t *testing.T) {
-	config := &SocketConfig{
+	sConfig := &SocketConfig{
 		Config: ConfigSet{
 			PropagateSocket: "/var/run/docker.sock",
 		},
 	}
 
-	rules := config.GetPropagationRules()
+	rules := sConfig.GetPropagationRules()
 	if len(rules) != 1 {
 		t.Fatalf("expected 1 rule, got %d", len(rules))
 	}
@@ -330,55 +288,100 @@ func TestValidateACLRuleWithRegex(t *testing.T) {
 	}
 }
 
-func TestLoadConfig(t *testing.T) {
-	tmpfile, err := os.CreateTemp("", "config-*.yaml")
-	if err != nil {
-		t.Fatal(err)
+func TestContainsValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		actual   any
+		expected any
+		want     bool
+	}{
+		{
+			name:     "string equals string",
+			actual:   "DEBUG=true",
+			expected: "DEBUG=true",
+			want:     true,
+		},
+		{
+			name:     "string does not contain substring",
+			actual:   "APP=test",
+			expected: "DEBUG",
+			want:     false,
+		},
+		{
+			name:     "array contains string",
+			actual:   []any{"DEBUG=true", "APP=test"},
+			expected: "DEBUG=true",
+			want:     true,
+		},
+		{
+			name:     "array contains all strings in expected array",
+			actual:   []any{"DEBUG=true", "APP=test", "LEVEL=info"},
+			expected: []any{"DEBUG=true", "APP=test"},
+			want:     true,
+		},
+		{
+			name:     "array does not contain all strings in expected array",
+			actual:   []any{"DEBUG=true", "APP=test"},
+			expected: []any{"DEBUG=true", "LEVEL=info"},
+			want:     false,
+		},
+		{
+			name:     "boolean equals boolean",
+			actual:   true,
+			expected: true,
+			want:     true,
+		},
+		{
+			name:     "boolean does not equal boolean",
+			actual:   true,
+			expected: false,
+			want:     false,
+		},
+		{
+			name:     "nil equals nil",
+			actual:   nil,
+			expected: nil,
+			want:     true,
+		},
+		{
+			name:     "nil does not equal non-nil",
+			actual:   nil,
+			expected: "something",
+			want:     false,
+		},
+		{
+			name:     "regex match in string",
+			actual:   "DEBUG_LEVEL=verbose",
+			expected: "DEBUG.*verbose",
+			want:     true,
+		},
+		{
+			name:     "regex no match in string",
+			actual:   "APP=test",
+			expected: "DEBUG.*",
+			want:     false,
+		},
+		{
+			name:     "regex match in array",
+			actual:   []any{"DEBUG_LEVEL=verbose", "APP=test"},
+			expected: "DEBUG.*verbose",
+			want:     true,
+		},
+		{
+			name:     "simple string does not work",
+			actual:   "DEBUG=true",
+			expected: "DEBUG",
+			want:     false,
+		},
 	}
-	defer func() {
-		if err := os.Remove(tmpfile.Name()); err != nil {
-			t.Errorf("Failed to remove temporary file: %v", err)
-		}
-	}()
 
-	// Write test config
-	testConfig := `{
-		"rules": [
-			{
-				"match": {
-					"path": "/v1.*/containers",
-					"method": "GET"
-				},
-				"actions": [
-					{
-						"action": "allow"
-					}
-				]
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := MatchValue(tt.expected, tt.actual)
+
+			if got != tt.want {
+				t.Errorf("MatchValue() = %v, want %v", got, tt.want)
 			}
-		]
-	}`
-	if _, err := tmpfile.Write([]byte(testConfig)); err != nil {
-		t.Fatal(err)
-	}
-	if err := tmpfile.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	// Test loading config
-	config, err := LoadSocketConfig(tmpfile.Name())
-	if err != nil {
-		t.Fatalf("LoadSocketConfig() error = %v", err)
-	}
-	if len(config.Rules) != 1 {
-		t.Errorf("Expected 1 rule, got %d", len(config.Rules))
-	}
-	if config.Rules[0].Match.Path != "/v1.*/containers" {
-		t.Errorf("Expected path /v1.*/containers, got %s", config.Rules[0].Match.Path)
-	}
-	if config.Rules[0].Match.Method != "GET" {
-		t.Errorf("Expected method GET, got %s", config.Rules[0].Match.Method)
-	}
-	if config.Rules[0].Actions[0].Action != "allow" {
-		t.Errorf("Expected action allow, got %s", config.Rules[0].Actions[0].Action)
+		})
 	}
 }

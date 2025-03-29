@@ -15,7 +15,7 @@ import (
 	"strings"
 )
 
-func TestProxyHandler_CheckACLRules(t *testing.T) {
+func TestProxyHandler_ProcessRules(t *testing.T) {
 	tests := []struct {
 		name    string
 		request *http.Request
@@ -80,18 +80,265 @@ func TestProxyHandler_CheckACLRules(t *testing.T) {
 			want:   false,
 			reason: "Test deny",
 		},
+		{
+			name: "deny with matching body content",
+			request: func() *http.Request {
+				body := map[string]any{
+					"Env": []any{"BLOCK=true"},
+				}
+				bodyBytes, _ := json.Marshal(body)
+				req := httptest.NewRequest("POST", "/v1.42/containers/create", bytes.NewBuffer(bodyBytes))
+				req.Header.Set("Content-Type", "application/json")
+				return req
+			}(),
+			config: &config.SocketConfig{
+				Rules: []config.Rule{
+					{
+						Match: config.Match{
+							Path:   "/v1.*/containers/create",
+							Method: "POST",
+						},
+						Actions: []config.Action{
+							{
+								Action:   "deny",
+								Reason:   "Blocked by environment variable",
+								Contains: map[string]any{"Env": []any{"BLOCK=true"}},
+							},
+						},
+					},
+				},
+			},
+			want:   false,
+			reason: "Blocked by environment variable",
+		},
+		{
+			name: "allow when body doesn't match deny condition",
+			request: func() *http.Request {
+				body := map[string]any{
+					"Env": []any{"ALLOW=true"},
+				}
+				bodyBytes, _ := json.Marshal(body)
+				req := httptest.NewRequest("POST", "/v1.42/containers/create", bytes.NewBuffer(bodyBytes))
+				req.Header.Set("Content-Type", "application/json")
+				return req
+			}(),
+			config: &config.SocketConfig{
+				Rules: []config.Rule{
+					{
+						Match: config.Match{
+							Path:   "/v1.*/containers/create",
+							Method: "POST",
+						},
+						Actions: []config.Action{
+							{
+								Action:   "deny",
+								Reason:   "Blocked by environment variable",
+								Contains: map[string]any{"Env": []any{"BLOCK=true"}},
+							},
+						},
+					},
+				},
+			},
+			want:   true,
+			reason: "",
+		},
+		{
+			name: "deny with nested content match",
+			request: func() *http.Request {
+				body := map[string]any{
+					"HostConfig": map[string]any{
+						"Privileged": true,
+					},
+				}
+				bodyBytes, _ := json.Marshal(body)
+				req := httptest.NewRequest("POST", "/v1.42/containers/create", bytes.NewBuffer(bodyBytes))
+				req.Header.Set("Content-Type", "application/json")
+				return req
+			}(),
+			config: &config.SocketConfig{
+				Rules: []config.Rule{
+					{
+						Match: config.Match{
+							Path:   "/v1.*/containers/create",
+							Method: "POST",
+						},
+						Actions: []config.Action{
+							{
+								Action: "deny",
+								Reason: "Privileged containers not allowed",
+								Contains: map[string]any{
+									"HostConfig": map[string]any{
+										"Privileged": true,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			want:   false,
+			reason: "Privileged containers not allowed",
+		},
+		{
+			name: "deny with rule match contains and action contains",
+			request: func() *http.Request {
+				body := map[string]any{
+					"Env":     []any{"DEBUG=true"},
+					"Network": "host",
+				}
+				bodyBytes, _ := json.Marshal(body)
+				req := httptest.NewRequest("POST", "/v1.42/containers/create", bytes.NewBuffer(bodyBytes))
+				req.Header.Set("Content-Type", "application/json")
+				return req
+			}(),
+			config: &config.SocketConfig{
+				Rules: []config.Rule{
+					{
+						Match: config.Match{
+							Path:     "/v1.*/containers/create",
+							Method:   "POST",
+							Contains: map[string]any{"Env": []any{"DEBUG=true"}},
+						},
+						Actions: []config.Action{
+							{
+								Action:   "deny",
+								Reason:   "Host network not allowed with debug mode",
+								Contains: map[string]any{"Network": "host"},
+							},
+						},
+					},
+				},
+			},
+			want:   false,
+			reason: "Host network not allowed with debug mode",
+		},
+		{
+			name: "allow skips subsequent deny rules",
+			request: func() *http.Request {
+				body := map[string]any{
+					"Env": []any{"ALLOW=true", "BLOCK=true"},
+				}
+				bodyBytes, _ := json.Marshal(body)
+				req := httptest.NewRequest("POST", "/v1.42/containers/create", bytes.NewBuffer(bodyBytes))
+				req.Header.Set("Content-Type", "application/json")
+				return req
+			}(),
+			config: &config.SocketConfig{
+				Rules: []config.Rule{
+					{
+						Match: config.Match{
+							Path:   "/v1.*/containers/create",
+							Method: "POST",
+							Contains: map[string]any{
+								"Env": []any{"ALLOW=true"},
+							},
+						},
+						Actions: []config.Action{
+							{
+								Action: "allow",
+								Reason: "Explicitly allowed",
+							},
+						},
+					},
+					{
+						Match: config.Match{
+							Path:   "/v1.*/containers/create",
+							Method: "POST",
+							Contains: map[string]any{
+								"Env": []any{"BLOCK=true"},
+							},
+						},
+						Actions: []config.Action{
+							{
+								Action: "deny",
+								Reason: "Should not reach this rule",
+							},
+						},
+					},
+				},
+			},
+			want:   true,
+			reason: "Explicitly allowed",
+		},
+		{
+			name: "allow in first action skips subsequent deny actions in same rule",
+			request: func() *http.Request {
+				body := map[string]any{
+					"Env": []any{"MIXED=true"},
+				}
+				bodyBytes, _ := json.Marshal(body)
+				req := httptest.NewRequest("POST", "/v1.42/containers/create", bytes.NewBuffer(bodyBytes))
+				req.Header.Set("Content-Type", "application/json")
+				return req
+			}(),
+			config: &config.SocketConfig{
+				Rules: []config.Rule{
+					{
+						Match: config.Match{
+							Path:   "/v1.*/containers/create",
+							Method: "POST",
+						},
+						Actions: []config.Action{
+							{
+								Action: "allow",
+								Reason: "Allow first",
+							},
+							{
+								Action: "deny",
+								Reason: "Should not reach this action",
+							},
+						},
+					},
+				},
+			},
+			want:   true,
+			reason: "Allow first",
+		},
+		{
+			name: "body remains readable after allow",
+			request: func() *http.Request {
+				body := map[string]any{
+					"Env": []any{"TEST=true"},
+				}
+				bodyBytes, _ := json.Marshal(body)
+				req := httptest.NewRequest("POST", "/v1.42/containers/create", bytes.NewBuffer(bodyBytes))
+				req.Header.Set("Content-Type", "application/json")
+				return req
+			}(),
+			config: &config.SocketConfig{
+				Rules: []config.Rule{
+					{
+						Match: config.Match{
+							Path:   "/v1.*/containers/create",
+							Method: "POST",
+						},
+						Actions: []config.Action{
+							{
+								Action: "allow",
+								Reason: "Allowed",
+							},
+						},
+					},
+				},
+			},
+			want:   true,
+			reason: "Allowed",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			handler := NewProxyHandler("/tmp/docker.sock", make(map[string]*config.SocketConfig), &sync.RWMutex{})
 
-			got, reason := handler.checkACLRules(tt.request, tt.config)
+			got, reason, err := handler.processRules(tt.request, tt.config)
+			if err != nil {
+				t.Fatalf("processRules() error = %v", err)
+			}
 			if got != tt.want {
-				t.Errorf("checkACLRules() got = %v, want %v", got, tt.want)
+				t.Errorf("processRules() got = %v, want %v", got, tt.want)
 			}
 			if reason != tt.reason {
-				t.Errorf("checkACLRules() reason = %v, want %v", reason, tt.reason)
+				t.Errorf("processRules() reason = %v, want %v", reason, tt.reason)
 			}
 		})
 	}
@@ -436,361 +683,48 @@ func TestRegexMatching(t *testing.T) {
 	}
 }
 
-func TestContainsMatching(t *testing.T) {
-	tests := []struct {
-		name    string
-		request *http.Request
-		match   config.Match
-		want    bool
-	}{
-		{
-			name:    "match path and method",
-			request: httptest.NewRequest("GET", "/v1.24/containers/json", nil),
-			match: config.Match{
-				Path:   "/v1.*/containers/json",
-				Method: "GET",
-			},
-			want: true,
-		},
-		{
-			name:    "match path only",
-			request: httptest.NewRequest("GET", "/v1.24/containers/json", nil),
-			match: config.Match{
-				Path: "/v1.*/containers/json",
-			},
-			want: true,
-		},
-		{
-			name:    "match method only",
-			request: httptest.NewRequest("GET", "/v1.24/containers/json", nil),
-			match: config.Match{
-				Method: "GET",
-			},
-			want: true,
-		},
-		{
-			name:    "no match path",
-			request: httptest.NewRequest("GET", "/v1.24/containers/json", nil),
-			match: config.Match{
-				Path:   "/v1.*/images/json",
-				Method: "GET",
-			},
-			want: false,
-		},
-		{
-			name:    "no match method",
-			request: httptest.NewRequest("GET", "/v1.24/containers/json", nil),
-			match: config.Match{
-				Path:   "/v1.*/containers/json",
-				Method: "POST",
-			},
-			want: false,
-		},
-		{
-			name: "match simple env variable",
-			request: func() *http.Request {
-				body := map[string]interface{}{
-					"Env": []interface{}{"DEBUG=true"},
-				}
-				bodyBytes, _ := json.Marshal(body)
-				req := httptest.NewRequest("POST", "/v1.24/containers/create", bytes.NewReader(bodyBytes))
-				req.Header.Set("Content-Type", "application/json")
-				return req
-			}(),
-			match: config.Match{
-				Path:   "/v1.*/containers/create",
-				Method: "POST",
-				Contains: map[string]interface{}{
-					"Env": []interface{}{"DEBUG=true"},
+func TestProxyHandler_BodyRemains_Readable(t *testing.T) {
+	handler := &ProxyHandler{}
+
+	cfg := &config.SocketConfig{
+		Rules: []config.Rule{
+			{
+				Match: config.Match{
+					Path:   "/v1.*/containers/create",
+					Method: "POST",
 				},
-			},
-			want: true,
-		},
-		{
-			name: "match partial env variable",
-			request: func() *http.Request {
-				body := map[string]interface{}{
-					"Env": []interface{}{"DEBUG=true", "APP=test"},
-				}
-				bodyBytes, _ := json.Marshal(body)
-				req := httptest.NewRequest("POST", "/v1.24/containers/create", bytes.NewReader(bodyBytes))
-				req.Header.Set("Content-Type", "application/json")
-				return req
-			}(),
-			match: config.Match{
-				Path:   "/v1.*/containers/create",
-				Method: "POST",
-				Contains: map[string]interface{}{
-					"Env": []interface{}{"DEBUG.*"},
-				},
-			},
-			want: true,
-		},
-		{
-			name: "match nested field",
-			request: func() *http.Request {
-				body := map[string]interface{}{
-					"HostConfig": map[string]interface{}{
-						"Privileged": true,
-					},
-				}
-				bodyBytes, _ := json.Marshal(body)
-				req := httptest.NewRequest("POST", "/v1.24/containers/create", bytes.NewReader(bodyBytes))
-				req.Header.Set("Content-Type", "application/json")
-				return req
-			}(),
-			match: config.Match{
-				Path:   "/v1.*/containers/create",
-				Method: "POST",
-				Contains: map[string]interface{}{
-					"HostConfig": map[string]interface{}{
-						"Privileged": true,
+				Actions: []config.Action{
+					{
+						Action: "allow",
+						Reason: "test",
 					},
 				},
 			},
-			want: true,
-		},
-		{
-			name: "no match env variable",
-			request: func() *http.Request {
-				body := map[string]interface{}{
-					"Env": []interface{}{"APP=test"},
-				}
-				bodyBytes, _ := json.Marshal(body)
-				req := httptest.NewRequest("POST", "/v1.24/containers/create", bytes.NewReader(bodyBytes))
-				req.Header.Set("Content-Type", "application/json")
-				return req
-			}(),
-			match: config.Match{
-				Path:   "/v1.*/containers/create",
-				Method: "POST",
-				Contains: map[string]interface{}{
-					"Env": []interface{}{"DEBUG=true"},
-				},
-			},
-			want: false,
-		},
-		{
-			name: "match labels",
-			request: func() *http.Request {
-				body := map[string]interface{}{
-					"Labels": map[string]interface{}{
-						"com.example.label1": "value1",
-						"com.example.label2": "value2",
-					},
-				}
-				bodyBytes, _ := json.Marshal(body)
-				req := httptest.NewRequest("POST", "/v1.24/containers/create", bytes.NewReader(bodyBytes))
-				req.Header.Set("Content-Type", "application/json")
-				return req
-			}(),
-			match: config.Match{
-				Path:   "/v1.*/containers/create",
-				Method: "POST",
-				Contains: map[string]interface{}{
-					"Labels": map[string]interface{}{
-						"com.example.label1": "value1",
-					},
-				},
-			},
-			want: true,
-		},
-		{
-			name: "match volume mounts",
-			request: func() *http.Request {
-				body := map[string]interface{}{
-					"HostConfig": map[string]interface{}{
-						"Binds": []interface{}{
-							"/host/path:/container/path",
-							"/another/path:/another/container/path",
-						},
-					},
-				}
-				bodyBytes, _ := json.Marshal(body)
-				req := httptest.NewRequest("POST", "/v1.24/containers/create", bytes.NewReader(bodyBytes))
-				req.Header.Set("Content-Type", "application/json")
-				return req
-			}(),
-			match: config.Match{
-				Path:   "/v1.*/containers/create",
-				Method: "POST",
-				Contains: map[string]interface{}{
-					"HostConfig": map[string]interface{}{
-						"Binds": []interface{}{"/host/path:/container/path"},
-					},
-				},
-			},
-			want: true,
-		},
-		{
-			name: "match multiple conditions",
-			request: func() *http.Request {
-				body := map[string]interface{}{
-					"Env": []interface{}{"DEBUG=true", "APP=test"},
-					"HostConfig": map[string]interface{}{
-						"Privileged": true,
-						"Binds": []interface{}{
-							"/host/path:/container/path",
-						},
-					},
-					"Labels": map[string]interface{}{
-						"com.example.label1": "value1",
-					},
-				}
-				bodyBytes, _ := json.Marshal(body)
-				req := httptest.NewRequest("POST", "/v1.24/containers/create", bytes.NewReader(bodyBytes))
-				req.Header.Set("Content-Type", "application/json")
-				return req
-			}(),
-			match: config.Match{
-				Path:   "/v1.*/containers/create",
-				Method: "POST",
-				Contains: map[string]interface{}{
-					"Env": []interface{}{"DEBUG=true"},
-					"HostConfig": map[string]interface{}{
-						"Privileged": true,
-					},
-					"Labels": map[string]interface{}{
-						"com.example.label1": "value1",
-					},
-				},
-			},
-			want: true,
-		},
-		{
-			name: "no match multiple conditions",
-			request: func() *http.Request {
-				body := map[string]interface{}{
-					"Env": []interface{}{"DEBUG=true", "APP=test"},
-					"HostConfig": map[string]interface{}{
-						"Privileged": false,
-					},
-				}
-				bodyBytes, _ := json.Marshal(body)
-				req := httptest.NewRequest("POST", "/v1.24/containers/create", bytes.NewReader(bodyBytes))
-				req.Header.Set("Content-Type", "application/json")
-				return req
-			}(),
-			match: config.Match{
-				Path:   "/v1.*/containers/create",
-				Method: "POST",
-				Contains: map[string]interface{}{
-					"Env": []interface{}{"DEBUG=true"},
-					"HostConfig": map[string]interface{}{
-						"Privileged": true,
-					},
-				},
-			},
-			want: false,
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			handler := NewProxyHandler("/tmp/docker.sock", make(map[string]*config.SocketConfig), &sync.RWMutex{})
+	// Create a test request with a body
+	body := []byte(`{"test": "data"}`)
+	req := httptest.NewRequest("POST", "/v1.24/containers/create", bytes.NewReader(body))
 
-			got := handler.ruleMatches(tt.request, tt.match)
-			if got != tt.want {
-				t.Errorf("ruleMatches() = %v, want %v", got, tt.want)
-			}
-		})
+	// Process rules
+	allowed, reason, err := handler.processRules(req, cfg)
+	if err != nil {
+		t.Fatalf("processRules() error = %v", err)
 	}
-}
-
-func TestContainsValue(t *testing.T) {
-	tests := []struct {
-		name     string
-		actual   interface{}
-		expected interface{}
-		want     bool
-	}{
-		{
-			name:     "string equals string",
-			actual:   "DEBUG=true",
-			expected: "DEBUG=true",
-			want:     true,
-		},
-		{
-			name:     "string does not contain substring",
-			actual:   "APP=test",
-			expected: "DEBUG",
-			want:     false,
-		},
-		{
-			name:     "array contains string",
-			actual:   []interface{}{"DEBUG=true", "APP=test"},
-			expected: "DEBUG=true",
-			want:     true,
-		},
-		{
-			name:     "array contains all strings in expected array",
-			actual:   []interface{}{"DEBUG=true", "APP=test", "LEVEL=info"},
-			expected: []interface{}{"DEBUG=true", "APP=test"},
-			want:     true,
-		},
-		{
-			name:     "array does not contain all strings in expected array",
-			actual:   []interface{}{"DEBUG=true", "APP=test"},
-			expected: []interface{}{"DEBUG=true", "LEVEL=info"},
-			want:     false,
-		},
-		{
-			name:     "boolean equals boolean",
-			actual:   true,
-			expected: true,
-			want:     true,
-		},
-		{
-			name:     "boolean does not equal boolean",
-			actual:   true,
-			expected: false,
-			want:     false,
-		},
-		{
-			name:     "nil equals nil",
-			actual:   nil,
-			expected: nil,
-			want:     true,
-		},
-		{
-			name:     "nil does not equal non-nil",
-			actual:   nil,
-			expected: "something",
-			want:     false,
-		},
-		{
-			name:     "regex match in string",
-			actual:   "DEBUG_LEVEL=verbose",
-			expected: "DEBUG.*verbose",
-			want:     true,
-		},
-		{
-			name:     "regex no match in string",
-			actual:   "APP=test",
-			expected: "DEBUG.*",
-			want:     false,
-		},
-		{
-			name:     "regex match in array",
-			actual:   []interface{}{"DEBUG_LEVEL=verbose", "APP=test"},
-			expected: "DEBUG.*verbose",
-			want:     true,
-		},
-		{
-			name:     "simple string does not work",
-			actual:   "DEBUG=true",
-			expected: "DEBUG",
-			want:     false,
-		},
+	if !allowed {
+		t.Errorf("processRules() got = %v, want true", allowed)
+	}
+	if reason != "test" {
+		t.Errorf("processRules() reason = %v, want test", reason)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := config.MatchValue(tt.expected, tt.actual)
-
-			if got != tt.want {
-				t.Errorf("MatchValue() = %v, want %v", got, tt.want)
-			}
-		})
+	// Try to read the body again
+	bodyBytes, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatalf("Failed to read body: %v", err)
+	}
+	if string(bodyBytes) != string(body) {
+		t.Errorf("Body was not preserved, got %v, want %v", string(bodyBytes), string(body))
 	}
 }
