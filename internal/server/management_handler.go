@@ -400,15 +400,16 @@ func (h *ManagementHandler) handleDescribeSocket(w http.ResponseWriter, r *http.
 }
 
 func (h *ManagementHandler) Cleanup() {
+	log := logging.GetLogger()
 	h.serverMu.Lock()
 	defer h.serverMu.Unlock()
 
 	for path, server := range h.servers {
 		if err := server.Close(); err != nil {
-			logging.GetLogger().Error("Failed to close server", "path", path, "error", err)
+			log.Error("Failed to close server", "path", path, "error", err)
 		}
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			logging.GetLogger().Error("Failed to remove socket file", "path", path, "error", err)
+			log.Error("Failed to remove socket file", "path", path, "error", err)
 		}
 		delete(h.servers, path)
 	}

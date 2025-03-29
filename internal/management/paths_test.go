@@ -37,7 +37,11 @@ func TestSocketPathsWithCustomPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	customPaths := &SocketPaths{
 		Management: filepath.Join(tmpDir, "mgmt.sock"),

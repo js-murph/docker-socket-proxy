@@ -22,29 +22,33 @@ import (
 
 func TestManagementHandler_CreateSocket(t *testing.T) {
 	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("/tmp", "docker-proxy-test")
+	tmpDir, err := os.MkdirTemp("/tmp", "docker-proxy-test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	// Create a test config
 	testConfig := createTestConfig()
 
 	// Create a test server with context
-	store := storage.NewFileStore(tempDir)
+	store := storage.NewFileStore(tmpDir)
 	configs := make(map[string]*config.SocketConfig)
 
 	// Create a mock server
 	mockServer := &Server{
-		socketDir:     tempDir,
+		socketDir:     tmpDir,
 		store:         store,
 		socketConfigs: configs,
 		proxyServers:  make(map[string]*http.Server),
 	}
 
 	// Create the handler
-	handler := NewManagementHandler(tempDir, configs, &sync.RWMutex{}, store)
+	handler := NewManagementHandler(tmpDir, configs, &sync.RWMutex{}, store)
 
 	// Create a server that injects the mock server into the context
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -175,7 +179,11 @@ func TestManagementHandler_DeleteSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	configs := make(map[string]*config.SocketConfig)
 	store := storage.NewFileStore(tmpDir)
@@ -321,7 +329,11 @@ func TestManagementHandler_ListSockets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	configs := make(map[string]*config.SocketConfig)
 	store := storage.NewFileStore(tmpDir)
@@ -408,7 +420,11 @@ func TestManagementHandler_DescribeSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	// Create a test socket path
 	socketPath := filepath.Join(tmpDir, "test.sock")
@@ -539,7 +555,11 @@ func TestManagementHandler_ResolveSocketPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	configs := make(map[string]*config.SocketConfig)
 	store := storage.NewFileStore(tmpDir)
@@ -650,7 +670,11 @@ func TestManagementHandler(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	configs := make(map[string]*config.SocketConfig)
 	store := storage.NewFileStore(tmpDir)
