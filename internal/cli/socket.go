@@ -26,7 +26,7 @@ func RunCreate(cmd *cobra.Command, paths *management.SocketPaths) {
 		var err error
 		socketConfig, err = config.LoadSocketConfig(configPath)
 		if err != nil {
-			errOut.Error(fmt.Errorf("Error loading configuration: %v", err))
+			errOut.Error(fmt.Errorf("error loading configuration: %v", err))
 			osExit(1)
 		}
 	}
@@ -36,7 +36,7 @@ func RunCreate(cmd *cobra.Command, paths *management.SocketPaths) {
 	if socketConfig != nil {
 		configJSON, err := json.Marshal(socketConfig)
 		if err != nil {
-			errOut.Error(fmt.Errorf("Error encoding configuration: %v", err))
+			errOut.Error(fmt.Errorf("error encoding configuration: %v", err))
 			osExit(1)
 		}
 		body = bytes.NewReader(configJSON)
@@ -59,22 +59,26 @@ func RunCreate(cmd *cobra.Command, paths *management.SocketPaths) {
 	// Handle the response
 	responseBody, err := handleResponse(resp, http.StatusOK)
 	if err != nil {
-		errOut.Error(fmt.Errorf("Server error: %v", err))
+		errOut.Error(fmt.Errorf("server error: %v", err))
 		osExit(1)
 	}
 
 	// Parse the JSON response
 	var response management.Response[management.CreateResponse]
 	if err := json.Unmarshal(responseBody, &response); err != nil {
-		errOut.Error(fmt.Errorf("Failed to parse response: %v", err))
+		errOut.Error(fmt.Errorf("failed to parse response: %v", err))
 		osExit(1)
 	}
 
 	// Print in requested format
 	if format, _ := cmd.Flags().GetString("output"); format == "text" {
-		out.Print(response.Response.Socket)
+		if err := out.Print(response.Response.Socket); err != nil {
+			exitWithError("Failed to print output: %v", err)
+		}
 	} else {
-		out.Print(response.Response)
+		if err := out.Print(response.Response); err != nil {
+			exitWithError("Failed to print output: %v", err)
+		}
 	}
 }
 
@@ -84,7 +88,7 @@ func RunDelete(cmd *cobra.Command, args []string, paths *management.SocketPaths)
 	errOut := getErrorOutput(cmd)
 
 	if len(args) == 0 {
-		errOut.Error(fmt.Errorf("Error: socket path is required"))
+		errOut.Error(fmt.Errorf("error: socket path is required"))
 		osExit(1)
 	}
 
@@ -96,7 +100,7 @@ func RunDelete(cmd *cobra.Command, args []string, paths *management.SocketPaths)
 	// Create the delete request
 	req, err := http.NewRequest("DELETE", "http://localhost/socket/delete", nil)
 	if err != nil {
-		errOut.Error(fmt.Errorf("Error creating request: %v", err))
+		errOut.Error(fmt.Errorf("error creating request: %v", err))
 		osExit(1)
 	}
 
@@ -111,7 +115,7 @@ func RunDelete(cmd *cobra.Command, args []string, paths *management.SocketPaths)
 	// Send the request
 	resp, err := client.Do(req)
 	if err != nil {
-		errOut.Error(fmt.Errorf("Error sending request: %v", err))
+		errOut.Error(fmt.Errorf("error sending request: %v", err))
 		osExit(1)
 	}
 	defer func() {
@@ -123,22 +127,26 @@ func RunDelete(cmd *cobra.Command, args []string, paths *management.SocketPaths)
 	// Handle the response
 	responseBody, err := handleResponse(resp, http.StatusOK)
 	if err != nil {
-		errOut.Error(fmt.Errorf("Failed to delete socket: %v", err))
+		errOut.Error(fmt.Errorf("failed to delete socket: %v", err))
 		osExit(1)
 	}
 
 	// Parse the JSON response
 	var response management.Response[management.DeleteResponse]
 	if err := json.Unmarshal(responseBody, &response); err != nil {
-		errOut.Error(fmt.Errorf("Failed to parse response: %v", err))
+		errOut.Error(fmt.Errorf("failed to parse response: %v", err))
 		osExit(1)
 	}
 
 	// Print in requested format
 	if format, _ := cmd.Flags().GetString("output"); format == "text" {
-		out.Print(response.Response.Message)
+		if err := out.Print(response.Response.Message); err != nil {
+			exitWithError("Failed to print output: %v", err)
+		}
 	} else {
-		out.Print(response.Response)
+		if err := out.Print(response.Response); err != nil {
+			exitWithError("Failed to print output: %v", err)
+		}
 	}
 }
 
@@ -148,7 +156,7 @@ func RunDescribe(cmd *cobra.Command, args []string, paths *management.SocketPath
 	errOut := getErrorOutput(cmd)
 
 	if len(args) == 0 {
-		errOut.Error(fmt.Errorf("Error: socket name is required"))
+		errOut.Error(fmt.Errorf("error: socket name is required"))
 		osExit(1)
 	}
 
@@ -160,7 +168,7 @@ func RunDescribe(cmd *cobra.Command, args []string, paths *management.SocketPath
 	// Create the describe request
 	req, err := http.NewRequest("GET", "http://localhost/socket/describe", nil)
 	if err != nil {
-		errOut.Error(fmt.Errorf("Error creating request: %v", err))
+		errOut.Error(fmt.Errorf("error creating request: %v", err))
 		osExit(1)
 	}
 
@@ -172,7 +180,7 @@ func RunDescribe(cmd *cobra.Command, args []string, paths *management.SocketPath
 	// Send the request
 	resp, err := client.Do(req)
 	if err != nil {
-		errOut.Error(fmt.Errorf("Error sending request: %v", err))
+		errOut.Error(fmt.Errorf("error sending request: %v", err))
 		osExit(1)
 	}
 	defer func() {
@@ -184,25 +192,27 @@ func RunDescribe(cmd *cobra.Command, args []string, paths *management.SocketPath
 	// Handle the response
 	responseBody, err := handleResponse(resp, http.StatusOK)
 	if err != nil {
-		errOut.Error(fmt.Errorf("Failed to describe socket: %v", err))
+		errOut.Error(fmt.Errorf("failed to describe socket: %v", err))
 		osExit(1)
 	}
 
 	// Parse the JSON response
 	var response management.Response[management.DescribeResponse]
 	if err := json.Unmarshal(responseBody, &response); err != nil {
-		errOut.Error(fmt.Errorf("Error parsing response: %v", err))
+		errOut.Error(fmt.Errorf("error parsing response: %v", err))
 		osExit(1)
 	}
 
 	// Print in requested format
 	if format, _ := cmd.Flags().GetString("output"); format == "text" {
 		if err := yaml.NewEncoder(out.Writer()).Encode(response.Response.Config); err != nil {
-			errOut.Error(fmt.Errorf("Failed to encode config: %v", err))
+			errOut.Error(fmt.Errorf("failed to encode config: %v", err))
 			osExit(1)
 		}
 	} else {
-		out.Print(response.Response)
+		if err := out.Print(response.Response); err != nil {
+			exitWithError("Failed to print output: %v", err)
+		}
 	}
 }
 
@@ -217,14 +227,14 @@ func RunList(cmd *cobra.Command, paths *management.SocketPaths) {
 	// Create the list request
 	req, err := http.NewRequest("GET", "http://localhost/socket/list", nil)
 	if err != nil {
-		errOut.Error(fmt.Errorf("Error creating request: %v", err))
+		errOut.Error(fmt.Errorf("error creating request: %v", err))
 		osExit(1)
 	}
 
 	// Send the request
 	resp, err := client.Do(req)
 	if err != nil {
-		errOut.Error(fmt.Errorf("Error sending request: %v", err))
+		errOut.Error(fmt.Errorf("error sending request: %v", err))
 		osExit(1)
 	}
 	defer func() {
@@ -236,24 +246,28 @@ func RunList(cmd *cobra.Command, paths *management.SocketPaths) {
 	// Handle the response
 	responseBody, err := handleResponse(resp, http.StatusOK)
 	if err != nil {
-		errOut.Error(fmt.Errorf("Failed to list sockets: %v", err))
+		errOut.Error(fmt.Errorf("failed to list sockets: %v", err))
 		osExit(1)
 	}
 
 	// Parse the response
 	var response management.Response[management.ListResponse]
 	if err := json.Unmarshal(responseBody, &response); err != nil {
-		errOut.Error(fmt.Errorf("Error parsing response: %v", err))
+		errOut.Error(fmt.Errorf("error parsing response: %v", err))
 		osExit(1)
 	}
 
 	// Print in requested format
 	if format, _ := cmd.Flags().GetString("output"); format == "text" {
 		for _, socket := range response.Response.Sockets {
-			out.Print(socket)
+			if err := out.Print(socket); err != nil {
+				exitWithError("Failed to print output: %v", err)
+			}
 		}
 	} else {
-		out.Print(response.Response)
+		if err := out.Print(response.Response); err != nil {
+			exitWithError("Failed to print output: %v", err)
+		}
 	}
 }
 
@@ -268,14 +282,14 @@ func RunClean(cmd *cobra.Command, paths *management.SocketPaths) {
 	// Create the clean request
 	req, err := http.NewRequest("DELETE", "http://localhost/socket/clean", nil)
 	if err != nil {
-		errOut.Error(fmt.Errorf("Error creating request: %v", err))
+		errOut.Error(fmt.Errorf("error creating request: %v", err))
 		osExit(1)
 	}
 
 	// Send the request
 	resp, err := client.Do(req)
 	if err != nil {
-		errOut.Error(fmt.Errorf("Error sending request: %v", err))
+		errOut.Error(fmt.Errorf("error sending request: %v", err))
 		osExit(1)
 	}
 	defer func() {
@@ -287,7 +301,7 @@ func RunClean(cmd *cobra.Command, paths *management.SocketPaths) {
 	// Handle the response
 	_, err = handleResponse(resp, http.StatusOK)
 	if err != nil {
-		errOut.Error(fmt.Errorf("Failed to clean sockets: %v", err))
+		errOut.Error(fmt.Errorf("failed to clean sockets: %v", err))
 		osExit(1)
 	}
 
