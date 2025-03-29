@@ -130,6 +130,7 @@ func TestServer(t *testing.T) {
 
 // Add this method to the Server struct
 func (s *Server) startWithContext(ctx context.Context) error {
+	log := logging.GetLogger()
 	// Set up the management handler
 	handler := NewManagementHandler(s.dockerSocket, s.socketConfigs, &s.configMu, s.store)
 	s.server.Handler = handler
@@ -141,15 +142,20 @@ func (s *Server) startWithContext(ctx context.Context) error {
 	}
 
 	// Remove the socket file when the server stops
-	defer os.Remove(s.managementSocket)
+	defer func() {
+		if err := os.Remove(s.managementSocket); err != nil {
+			log.Error("Failed to remove management socket", "error", err)
+		}
+	}()
 
-	log := logging.GetLogger()
 	log.Info("Management server listening on socket", "path", s.managementSocket)
 
 	// Serve until context is canceled
 	go func() {
 		<-ctx.Done()
-		s.server.Close()
+		if err := s.server.Close(); err != nil {
+			log.Error("Failed to close server", "error", err)
+		}
 	}()
 
 	return s.server.Serve(listener)

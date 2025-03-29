@@ -77,7 +77,11 @@ func TestManagementHandler_CreateSocket(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to send request: %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				t.Errorf("Failed to close response body: %v", err)
+			}
+		}()
 
 		// Check the response
 		if resp.StatusCode != http.StatusOK {
@@ -145,7 +149,11 @@ func TestManagementHandler_CreateSocket(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to send request: %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				t.Errorf("Failed to close response body: %v", err)
+			}
+		}()
 
 		// Check the response
 		if resp.StatusCode != http.StatusOK {

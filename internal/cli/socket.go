@@ -163,7 +163,11 @@ func RunList(paths *management.SocketPaths) {
 	if err != nil {
 		exitWithError("Error sending request: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			exitWithError("Failed to close response body: %v", err)
+		}
+	}()
 
 	// Handle the response
 	body, err := handleResponse(resp, http.StatusOK)
@@ -205,7 +209,11 @@ func RunClean(cmd *cobra.Command, paths *management.SocketPaths) {
 	if err != nil {
 		exitWithError("Error sending request: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			exitWithError("Failed to close response body: %v", err)
+		}
+	}()
 
 	// Handle the response
 	_, err = handleResponse(resp, http.StatusOK)
