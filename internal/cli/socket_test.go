@@ -23,7 +23,11 @@ func TestRunCreate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	// Create a mock Unix socket server
 	socketPath := filepath.Join(tmpDir, "test.sock")
@@ -91,7 +95,11 @@ func TestRunDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	// Create a mock Unix socket server
 	socketPath := filepath.Join(tmpDir, "test.sock")
@@ -146,7 +154,11 @@ func TestRunList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	// Create a mock Unix socket server
 	socketPath := filepath.Join(tmpDir, "test.sock")
@@ -198,7 +210,11 @@ func TestRunDescribe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	// Create a mock Unix socket server
 	socketPath := filepath.Join(tmpDir, "test.sock")
@@ -264,7 +280,11 @@ func TestRunClean(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
 
 	// Create a mock Unix socket server
 	socketPath := filepath.Join(tmpDir, "test.sock")

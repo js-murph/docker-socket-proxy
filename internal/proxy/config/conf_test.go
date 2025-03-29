@@ -199,7 +199,11 @@ func TestLoadSocketConfig(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer os.Remove(tmpfile.Name())
+			defer func() {
+				if err := os.Remove(tmpfile.Name()); err != nil {
+					t.Errorf("Failed to remove temporary file: %v", err)
+				}
+			}()
 
 			// Write test content
 			if _, err := tmpfile.Write([]byte(tt.content)); err != nil {

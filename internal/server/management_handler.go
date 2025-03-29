@@ -258,8 +258,12 @@ func (h *ManagementHandler) handleDeleteSocket(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "Socket %s deleted successfully", socketPath)
+	// Return success response
+	if _, err := fmt.Fprintf(w, "Socket %s deleted successfully", socketPath); err != nil {
+		log.Error("Failed to write response", "error", err)
+		http.Error(w, fmt.Sprintf("Failed to write response: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
 // deleteSocket handles the actual deletion of a socket and its resources
@@ -400,8 +404,12 @@ func (h *ManagementHandler) Cleanup() {
 	defer h.serverMu.Unlock()
 
 	for path, server := range h.servers {
-		server.Close()
-		os.Remove(path)
+		if err := server.Close(); err != nil {
+			logging.GetLogger().Error("Failed to close server", "path", path, "error", err)
+		}
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			logging.GetLogger().Error("Failed to remove socket file", "path", path, "error", err)
+		}
 		delete(h.servers, path)
 	}
 }
