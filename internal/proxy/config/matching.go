@@ -166,7 +166,9 @@ func MatchesRule(r *http.Request, match Match) bool {
 		if err != nil {
 			return false
 		}
-		r.Body.Close()
+		if err := r.Body.Close(); err != nil {
+			return false
+		}
 		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
 		// Parse the JSON body

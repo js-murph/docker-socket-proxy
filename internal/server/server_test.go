@@ -34,15 +34,15 @@ func TestServer(t *testing.T) {
 		SocketDir:  tmpDir,
 	}
 
-	// Create a test socket and its config
-	testSocket := filepath.Join(tmpDir, "test.sock")
-
-	// Create the socket file to ensure it exists
-	l, err := net.Listen("unix", testSocket)
+	// Create a test socket
+	socketPath := filepath.Join(tmpDir, "test.sock")
+	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	l.Close()
+	if err := listener.Close(); err != nil {
+		t.Errorf("Failed to close listener: %v", err)
+	}
 
 	testConfig := &config.SocketConfig{
 		Rules: []config.Rule{
@@ -58,12 +58,12 @@ func TestServer(t *testing.T) {
 	}
 
 	store := storage.NewFileStore(paths.SocketDir)
-	if err := store.SaveConfig(testSocket, testConfig); err != nil {
+	if err := store.SaveConfig(socketPath, testConfig); err != nil {
 		t.Fatal(err)
 	}
 
 	// Verify the config was saved correctly
-	savedConfig, err := store.LoadConfig(testSocket)
+	savedConfig, err := store.LoadConfig(socketPath)
 	if err != nil {
 		t.Fatalf("Failed to load saved config: %v", err)
 	}
@@ -87,12 +87,12 @@ func TestServer(t *testing.T) {
 
 	// Manually add the config
 	srv.configMu.Lock()
-	srv.socketConfigs[testSocket] = testConfig
+	srv.socketConfigs[socketPath] = testConfig
 	srv.configMu.Unlock()
 
 	// Verify config was loaded
 	srv.configMu.RLock()
-	cfg, ok := srv.socketConfigs[testSocket]
+	cfg, ok := srv.socketConfigs[socketPath]
 	srv.configMu.RUnlock()
 
 	if !ok {
