@@ -42,9 +42,13 @@ func RunCreate(cmd *cobra.Command, paths *management.SocketPaths) {
 	// Send the request
 	resp, err := client.Post("http://localhost/socket/create", "application/json", body)
 	if err != nil {
-		exitWithError("Error requesting socket: %v", err)
+		exitWithError("Failed to create socket: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			exitWithError("Failed to close response body: %v", err)
+		}
+	}()
 
 	// Handle the response
 	responseBody, err := handleResponse(resp, http.StatusOK)
@@ -85,7 +89,11 @@ func RunDelete(cmd *cobra.Command, args []string, paths *management.SocketPaths)
 	if err != nil {
 		exitWithError("Error sending request: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			exitWithError("Failed to close response body: %v", err)
+		}
+	}()
 
 	// Handle the response
 	_, err = handleResponse(resp, http.StatusOK)
@@ -123,7 +131,11 @@ func RunDescribe(cmd *cobra.Command, args []string, paths *management.SocketPath
 	if err != nil {
 		exitWithError("Error sending request: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			exitWithError("Failed to close response body: %v", err)
+		}
+	}()
 
 	// Handle the response
 	body, err := handleResponse(resp, http.StatusOK)

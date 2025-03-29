@@ -194,7 +194,9 @@ func TestManagementHandler_DeleteSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	listener.Close()
+	if err := listener.Close(); err != nil {
+		t.Errorf("Failed to close listener: %v", err)
+	}
 
 	// Add the socket to the configs
 	configs[socketPath] = &config.SocketConfig{}
@@ -251,7 +253,11 @@ func TestManagementHandler_DeleteSocket(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				listener.Close()
+				defer func() {
+					if err := listener.Close(); err != nil {
+						t.Errorf("Failed to close listener: %v", err)
+					}
+				}()
 
 				// Re-add the socket to the configs
 				configs[socketPath] = &config.SocketConfig{}
@@ -732,7 +738,11 @@ func TestManagementHandler(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				listener.Close()
+				defer func() {
+					if err := listener.Close(); err != nil {
+						t.Errorf("Failed to close listener: %v", err)
+					}
+				}()
 
 				// Add the socket to the configs
 				configs[socketPath] = &config.SocketConfig{}
