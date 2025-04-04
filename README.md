@@ -27,7 +27,7 @@ tar -xzf docker-socket-proxy.tgz
 mv docker-socket-proxy /usr/local/bin/docker-socket-proxy
 ```
 
-There's an example configuration file in [examples/config.yaml](examples/config.yaml). See the [docs](https://js-murph.github.io/docker-proxy-socket/docs/configuration) for more information.
+There's an example configuration file in [examples/config.yaml](examples/config.yaml). See the [docs](https://js-murph.github.io/docker-socket-proxy/) for more information.
 
 You can also find an example systemd service file in [examples/docker-socket-proxy.service](examples/docker-socket-proxy.service).
 
