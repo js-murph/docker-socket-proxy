@@ -11,7 +11,7 @@ A proxy for the Docker socket that allows for adding ACLs and rewriting requests
 
 ## But Why?
 
-Every now and then against your better judgement you may find yourself doing docker-in-docker, this helps you enforce some rules on the docker socket.
+Mostly to [play with some vibe coding from scratch](https://js-murph.github.io/blog/2025/03/31/low-code-vibes-to-chill-and-relax-to/) but every now and then against your better judgement you may find yourself doing docker-in-docker, this helps you enforce some rules on the docker socket.
 
 Maybe you are doing some docker-in-docker in CI and want to make sure that a particular mount is available on every subcontainer. Or maybe you're running Traefik using the Docker socket and want to make sure it can only access particular endpoints, in that case we got you covered.
 
