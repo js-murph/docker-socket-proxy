@@ -138,7 +138,7 @@ func TestManagementHandler_CreateSocketHandler(t *testing.T) {
 			if tt.expectedError {
 				var response map[string]interface{}
 				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
-				if response["success"] != nil {
+				if response["success"] == true {
 					t.Errorf("CreateSocketHandler() expected error response, got success")
 				}
 			} else {
@@ -205,7 +205,7 @@ func TestManagementHandler_ListSocketsHandler(t *testing.T) {
 			if tt.expectedError {
 				var response map[string]interface{}
 				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
-				if response["success"] != nil {
+				if response["success"] == true {
 					t.Errorf("ListSocketsHandler() expected error response, got success")
 				}
 			} else {
@@ -286,7 +286,7 @@ func TestManagementHandler_DescribeSocketHandler(t *testing.T) {
 			if tt.expectedError {
 				var response map[string]interface{}
 				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
-				if response["success"] != nil {
+				if response["success"] == true {
 					t.Errorf("DescribeSocketHandler() expected error response, got success")
 				}
 			} else {
@@ -363,7 +363,7 @@ func TestManagementHandler_DeleteSocketHandler(t *testing.T) {
 			if tt.expectedError {
 				var response map[string]interface{}
 				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
-				if response["success"] != nil {
+				if response["success"] == true {
 					t.Errorf("DeleteSocketHandler() expected error response, got success")
 				}
 			} else {
@@ -430,7 +430,7 @@ func TestManagementHandler_CleanSocketsHandler(t *testing.T) {
 			if tt.expectedError {
 				var response map[string]interface{}
 				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
-				if response["success"] != nil {
+				if response["success"] == true {
 					t.Errorf("CleanSocketsHandler() expected error response, got success")
 				}
 			} else {

@@ -6,7 +6,10 @@ build:
 	goreleaser build --clean --snapshot --single-target
 
 test:
-	gotestsum -skip-dirs=e2e
+	gotestsum -- ./internal/... ./cmd/...
+
+test-e2e:
+	gotestsum -- ./e2e/...
 
 lint:
 	golangci-lint run
@@ -56,7 +59,8 @@ help:
 	@echo "Usage: make <target>"
 	@echo "Targets:"
 	@echo "  build: Build the project"
-	@echo "  test: Run the tests"
+	@echo "  test: Run unit tests (excludes e2e)"
+	@echo "  test-e2e: Run e2e tests only"
 	@echo "  lint: Run the linter"
 	@echo "  run: Run the project"
 	@echo "  release: Release the project"

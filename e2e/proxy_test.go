@@ -554,7 +554,7 @@ func TestE2E_RewritingUpsert(t *testing.T) {
 	t.Run("ForceReadOnlyRootfs", func(t *testing.T) {
 		config := domain.SocketConfig{
 			Name:            "upsert-test",
-			ListenAddress:   filepath.Join(tempDir, "upsert-test.sock"),
+			ListenAddress:   "", // Auto-generated
 			DockerDaemonURL: "unix:///var/run/docker.sock",
 			Rules: []domain.Rule{
 				{
@@ -593,7 +593,7 @@ func TestE2E_RewritingUpsert(t *testing.T) {
 
 		req, _ := http.NewRequest("POST", "http://localhost:8083/v1.42/containers/create", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Socket-Path", filepath.Join(tempDir, "upsert-test.sock"))
+		req.Header.Set("Socket-Name", "upsert-test")
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -638,7 +638,7 @@ func TestE2E_RewritingUpsert(t *testing.T) {
 
 		config := domain.SocketConfig{
 			Name:            "env-upsert-test",
-			ListenAddress:   filepath.Join(tempDir, "env-upsert-test.sock"),
+			ListenAddress:   "", // Auto-generated
 			DockerDaemonURL: "unix:///var/run/docker.sock",
 			Rules: []domain.Rule{
 				{
@@ -678,7 +678,7 @@ func TestE2E_RewritingUpsert(t *testing.T) {
 
 		req, _ := http.NewRequest("POST", "http://localhost:8083/v1.42/containers/create", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Socket-Path", filepath.Join(tempDir, "env-upsert-test.sock"))
+		req.Header.Set("Socket-Name", "env-upsert-test")
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -723,7 +723,7 @@ func TestE2E_RewritingUpsert(t *testing.T) {
 
 		config := domain.SocketConfig{
 			Name:            "labels-upsert-test",
-			ListenAddress:   filepath.Join(tempDir, "labels-upsert-test.sock"),
+			ListenAddress:   "", // Auto-generated
 			DockerDaemonURL: "unix:///var/run/docker.sock",
 			Rules: []domain.Rule{
 				{
@@ -760,7 +760,7 @@ func TestE2E_RewritingUpsert(t *testing.T) {
 
 		req, _ := http.NewRequest("POST", "http://localhost:8083/v1.42/containers/create", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Socket-Path", filepath.Join(tempDir, "labels-upsert-test.sock"))
+		req.Header.Set("Socket-Name", "labels-upsert-test")
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -832,7 +832,7 @@ func TestE2E_RewritingReplace(t *testing.T) {
 	t.Run("DisablePrivilegedMode", func(t *testing.T) {
 		config := domain.SocketConfig{
 			Name:            "replace-test",
-			ListenAddress:   filepath.Join(tempDir, "replace-test.sock"),
+			ListenAddress:   "", // Auto-generated
 			DockerDaemonURL: "unix:///var/run/docker.sock",
 			Rules: []domain.Rule{
 				{
@@ -876,7 +876,7 @@ func TestE2E_RewritingReplace(t *testing.T) {
 
 		req, _ := http.NewRequest("POST", "http://localhost:8089/v1.42/containers/create", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Socket-Path", filepath.Join(tempDir, "replace-test.sock"))
+		req.Header.Set("Socket-Name", "replace-test")
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -913,7 +913,7 @@ func TestE2E_RewritingReplace(t *testing.T) {
 
 		config := domain.SocketConfig{
 			Name:            "image-replace-test",
-			ListenAddress:   filepath.Join(tempDir, "image-replace-test.sock"),
+			ListenAddress:   "", // Auto-generated
 			DockerDaemonURL: "unix:///var/run/docker.sock",
 			Rules: []domain.Rule{
 				{
@@ -950,7 +950,7 @@ func TestE2E_RewritingReplace(t *testing.T) {
 
 		req, _ := http.NewRequest("POST", "http://localhost:8089/v1.42/containers/create", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Socket-Path", filepath.Join(tempDir, "image-replace-test.sock"))
+		req.Header.Set("Socket-Name", "image-replace-test")
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -982,7 +982,7 @@ func TestE2E_RewritingReplace(t *testing.T) {
 
 		config := domain.SocketConfig{
 			Name:            "env-replace-test",
-			ListenAddress:   filepath.Join(tempDir, "env-replace-test.sock"),
+			ListenAddress:   "", // Auto-generated
 			DockerDaemonURL: "unix:///var/run/docker.sock",
 			Rules: []domain.Rule{
 				{
@@ -1028,7 +1028,7 @@ func TestE2E_RewritingReplace(t *testing.T) {
 
 		req, _ := http.NewRequest("POST", "http://localhost:8089/v1.42/containers/create", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Socket-Path", filepath.Join(tempDir, "env-replace-test.sock"))
+		req.Header.Set("Socket-Name", "env-replace-test")
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -1115,7 +1115,7 @@ func TestE2E_RewritingDelete(t *testing.T) {
 	t.Run("RemoveSensitiveEnvironmentVariables", func(t *testing.T) {
 		config := domain.SocketConfig{
 			Name:            "delete-test",
-			ListenAddress:   filepath.Join(tempDir, "delete-test.sock"),
+			ListenAddress:   "", // Auto-generated
 			DockerDaemonURL: "unix:///var/run/docker.sock",
 			Rules: []domain.Rule{
 				{
@@ -1158,7 +1158,7 @@ func TestE2E_RewritingDelete(t *testing.T) {
 
 		req, _ := http.NewRequest("POST", "http://localhost:8085/v1.42/containers/create", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Socket-Path", filepath.Join(tempDir, "delete-test.sock"))
+		req.Header.Set("Socket-Name", "delete-test")
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -1213,7 +1213,7 @@ func TestE2E_RewritingDelete(t *testing.T) {
 
 		config := domain.SocketConfig{
 			Name:            "privileged-delete-test",
-			ListenAddress:   filepath.Join(tempDir, "privileged-delete-test.sock"),
+			ListenAddress:   "", // Auto-generated
 			DockerDaemonURL: "unix:///var/run/docker.sock",
 			Rules: []domain.Rule{
 				{
@@ -1253,7 +1253,7 @@ func TestE2E_RewritingDelete(t *testing.T) {
 
 		req, _ := http.NewRequest("POST", "http://localhost:8085/v1.42/containers/create", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Socket-Path", filepath.Join(tempDir, "privileged-delete-test.sock"))
+		req.Header.Set("Socket-Name", "privileged-delete-test")
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -1293,7 +1293,7 @@ func TestE2E_RewritingDelete(t *testing.T) {
 
 		config := domain.SocketConfig{
 			Name:            "field-delete-test",
-			ListenAddress:   filepath.Join(tempDir, "field-delete-test.sock"),
+			ListenAddress:   "", // Auto-generated
 			DockerDaemonURL: "unix:///var/run/docker.sock",
 			Rules: []domain.Rule{
 				{
@@ -1330,7 +1330,7 @@ func TestE2E_RewritingDelete(t *testing.T) {
 
 		req, _ := http.NewRequest("POST", "http://localhost:8085/v1.42/containers/create", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Socket-Path", filepath.Join(tempDir, "field-delete-test.sock"))
+		req.Header.Set("Socket-Name", "field-delete-test")
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -1399,7 +1399,7 @@ func TestE2E_ContentMatching(t *testing.T) {
 	t.Run("DenyPrivilegedContainers", func(t *testing.T) {
 		config := domain.SocketConfig{
 			Name:            "privileged-deny-test",
-			ListenAddress:   filepath.Join(tempDir, "privileged-deny-test.sock"),
+			ListenAddress:   "", // Auto-generated
 			DockerDaemonURL: "unix:///var/run/docker.sock",
 			Rules: []domain.Rule{
 				{
@@ -1444,7 +1444,7 @@ func TestE2E_ContentMatching(t *testing.T) {
 
 		req, _ := http.NewRequest("POST", "http://localhost:8086/v1.42/containers/create", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Socket-Path", filepath.Join(tempDir, "privileged-deny-test.sock"))
+		req.Header.Set("Socket-Name", "privileged-deny-test")
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -1470,7 +1470,7 @@ func TestE2E_ContentMatching(t *testing.T) {
 
 		req, _ = http.NewRequest("POST", "http://localhost:8086/v1.42/containers/create", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Socket-Path", filepath.Join(tempDir, "privileged-deny-test.sock"))
+		req.Header.Set("Socket-Name", "privileged-deny-test")
 
 		resp, err = http.DefaultClient.Do(req)
 		if err != nil {
@@ -1495,7 +1495,7 @@ func TestE2E_ContentMatching(t *testing.T) {
 
 		config := domain.SocketConfig{
 			Name:            "env-deny-test",
-			ListenAddress:   filepath.Join(tempDir, "env-deny-test.sock"),
+			ListenAddress:   "", // Auto-generated
 			DockerDaemonURL: "unix:///var/run/docker.sock",
 			Rules: []domain.Rule{
 				{
@@ -1541,7 +1541,7 @@ func TestE2E_ContentMatching(t *testing.T) {
 
 		req, _ := http.NewRequest("POST", "http://localhost:8086/v1.42/containers/create", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Socket-Path", filepath.Join(tempDir, "env-deny-test.sock"))
+		req.Header.Set("Socket-Name", "env-deny-test")
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -1567,7 +1567,7 @@ func TestE2E_ContentMatching(t *testing.T) {
 
 		req, _ = http.NewRequest("POST", "http://localhost:8086/v1.42/containers/create", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Socket-Path", filepath.Join(tempDir, "env-deny-test.sock"))
+		req.Header.Set("Socket-Name", "env-deny-test")
 
 		resp, err = http.DefaultClient.Do(req)
 		if err != nil {
@@ -1592,7 +1592,7 @@ func TestE2E_ContentMatching(t *testing.T) {
 
 		config := domain.SocketConfig{
 			Name:            "nested-match-test",
-			ListenAddress:   filepath.Join(tempDir, "nested-match-test.sock"),
+			ListenAddress:   "", // Auto-generated
 			DockerDaemonURL: "unix:///var/run/docker.sock",
 			Rules: []domain.Rule{
 				{
@@ -1642,7 +1642,7 @@ func TestE2E_ContentMatching(t *testing.T) {
 
 		req, _ := http.NewRequest("POST", "http://localhost:8086/v1.42/containers/create", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Socket-Path", filepath.Join(tempDir, "nested-match-test.sock"))
+		req.Header.Set("Socket-Name", "nested-match-test")
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -1670,7 +1670,7 @@ func TestE2E_ContentMatching(t *testing.T) {
 
 		req, _ = http.NewRequest("POST", "http://localhost:8086/v1.42/containers/create", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Socket-Path", filepath.Join(tempDir, "nested-match-test.sock"))
+		req.Header.Set("Socket-Name", "nested-match-test")
 
 		resp, err = http.DefaultClient.Do(req)
 		if err != nil {
@@ -1730,7 +1730,7 @@ func TestE2E_MultipleActions(t *testing.T) {
 	t.Run("UpsertThenAllow", func(t *testing.T) {
 		config := domain.SocketConfig{
 			Name:            "multi-action-test",
-			ListenAddress:   filepath.Join(tempDir, "multi-action-test.sock"),
+			ListenAddress:   "", // Auto-generated
 			DockerDaemonURL: "unix:///var/run/docker.sock",
 			Rules: []domain.Rule{
 				{
@@ -1774,7 +1774,7 @@ func TestE2E_MultipleActions(t *testing.T) {
 
 		req, _ := http.NewRequest("POST", "http://localhost:8087/v1.42/containers/create", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Socket-Path", filepath.Join(tempDir, "multi-action-test.sock"))
+		req.Header.Set("Socket-Name", "multi-action-test")
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -1817,7 +1817,7 @@ func TestE2E_MultipleActions(t *testing.T) {
 
 		config := domain.SocketConfig{
 			Name:            "replace-upsert-test",
-			ListenAddress:   filepath.Join(tempDir, "replace-upsert-test.sock"),
+			ListenAddress:   "", // Auto-generated
 			DockerDaemonURL: "unix:///var/run/docker.sock",
 			Rules: []domain.Rule{
 				{
@@ -1862,7 +1862,7 @@ func TestE2E_MultipleActions(t *testing.T) {
 
 		req, _ := http.NewRequest("POST", "http://localhost:8087/v1.42/containers/create", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Socket-Path", filepath.Join(tempDir, "replace-upsert-test.sock"))
+		req.Header.Set("Socket-Name", "replace-upsert-test")
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -1908,7 +1908,7 @@ func TestE2E_MultipleActions(t *testing.T) {
 
 		config := domain.SocketConfig{
 			Name:            "delete-upsert-test",
-			ListenAddress:   filepath.Join(tempDir, "delete-upsert-test.sock"),
+			ListenAddress:   "", // Auto-generated
 			DockerDaemonURL: "unix:///var/run/docker.sock",
 			Rules: []domain.Rule{
 				{
@@ -1956,7 +1956,7 @@ func TestE2E_MultipleActions(t *testing.T) {
 
 		req, _ := http.NewRequest("POST", "http://localhost:8087/v1.42/containers/create", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Socket-Path", filepath.Join(tempDir, "delete-upsert-test.sock"))
+		req.Header.Set("Socket-Name", "delete-upsert-test")
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -2052,7 +2052,7 @@ func TestE2E_ComplexScenarios(t *testing.T) {
 	t.Run("CompleteSecurityPolicy", func(t *testing.T) {
 		config := domain.SocketConfig{
 			Name:            "security-policy-test",
-			ListenAddress:   filepath.Join(tempDir, "security-policy-test.sock"),
+			ListenAddress:   "", // Auto-generated
 			DockerDaemonURL: "unix:///var/run/docker.sock",
 			Rules: []domain.Rule{
 				// Deny privileged containers
@@ -2107,7 +2107,7 @@ func TestE2E_ComplexScenarios(t *testing.T) {
 
 		req, _ := http.NewRequest("POST", "http://localhost:8088/v1.42/containers/create", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Socket-Path", filepath.Join(tempDir, "security-policy-test.sock"))
+		req.Header.Set("Socket-Name", "security-policy-test")
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -2133,7 +2133,7 @@ func TestE2E_ComplexScenarios(t *testing.T) {
 
 		req, _ = http.NewRequest("POST", "http://localhost:8088/v1.42/containers/create", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Socket-Path", filepath.Join(tempDir, "security-policy-test.sock"))
+		req.Header.Set("Socket-Name", "security-policy-test")
 
 		resp, err = http.DefaultClient.Do(req)
 		if err != nil {
@@ -2167,7 +2167,7 @@ func TestE2E_ComplexScenarios(t *testing.T) {
 
 		config := domain.SocketConfig{
 			Name:            "volume-control-test",
-			ListenAddress:   filepath.Join(tempDir, "volume-control-test.sock"),
+			ListenAddress:   "", // Auto-generated
 			DockerDaemonURL: "unix:///var/run/docker.sock",
 			Rules: []domain.Rule{
 				// Deny volume listing
@@ -2200,7 +2200,7 @@ func TestE2E_ComplexScenarios(t *testing.T) {
 
 		// Test 2a: Volume listing should be denied
 		req, _ := http.NewRequest("GET", "http://localhost:8088/v1.42/volumes", nil)
-		req.Header.Set("Socket-Path", filepath.Join(tempDir, "volume-control-test.sock"))
+		req.Header.Set("Socket-Name", "volume-control-test")
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -2223,7 +2223,7 @@ func TestE2E_ComplexScenarios(t *testing.T) {
 
 		req, _ = http.NewRequest("POST", "http://localhost:8088/v1.42/containers/create", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Socket-Path", filepath.Join(tempDir, "volume-control-test.sock"))
+		req.Header.Set("Socket-Name", "volume-control-test")
 
 		resp, err = http.DefaultClient.Do(req)
 		if err != nil {
@@ -2248,7 +2248,7 @@ func TestE2E_ComplexScenarios(t *testing.T) {
 
 		config := domain.SocketConfig{
 			Name:            "env-filter-test",
-			ListenAddress:   filepath.Join(tempDir, "env-filter-test.sock"),
+			ListenAddress:   "", // Auto-generated
 			DockerDaemonURL: "unix:///var/run/docker.sock",
 			Rules: []domain.Rule{
 				// Deny containers with BLOCK=true
@@ -2313,7 +2313,7 @@ func TestE2E_ComplexScenarios(t *testing.T) {
 
 		req, _ := http.NewRequest("POST", "http://localhost:8088/v1.42/containers/create", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Socket-Path", filepath.Join(tempDir, "env-filter-test.sock"))
+		req.Header.Set("Socket-Name", "env-filter-test")
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -2341,7 +2341,7 @@ func TestE2E_ComplexScenarios(t *testing.T) {
 
 		req, _ = http.NewRequest("POST", "http://localhost:8088/v1.42/containers/create", bytes.NewReader(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Socket-Path", filepath.Join(tempDir, "env-filter-test.sock"))
+		req.Header.Set("Socket-Name", "env-filter-test")
 
 		resp, err = http.DefaultClient.Do(req)
 		if err != nil {

@@ -10,6 +10,26 @@ import (
 	"docker-socket-proxy/internal/logging"
 )
 
+// errorResponse represents a JSON error response
+type errorResponse struct {
+	Success bool   `json:"success"`
+	Error   string `json:"error"`
+}
+
+// writeJSON writes a JSON response with the given status code
+func writeJSON(w http.ResponseWriter, status int, v any) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	return json.NewEncoder(w).Encode(v)
+}
+
+// writeJSONError writes a JSON error response
+func writeJSONError(w http.ResponseWriter, status int, msg string) {
+	if err := writeJSON(w, status, errorResponse{Success: false, Error: msg}); err != nil {
+		logging.GetLogger().Error("failed to write JSON error response", "error", err)
+	}
+}
+
 // ManagementHandler handles HTTP requests for socket management
 type ManagementHandler struct {
 	socketService application.SocketService
@@ -27,13 +47,13 @@ func NewManagementHandler(socketService application.SocketService) *ManagementHa
 // CreateSocketHandler handles socket creation requests
 func (h *ManagementHandler) CreateSocketHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
 	var req CreateSocketRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
 
@@ -49,7 +69,7 @@ func (h *ManagementHandler) CreateSocketHandler(w http.ResponseWriter, r *http.R
 	socket, err := h.socketService.CreateSocket(r.Context(), config)
 	if err != nil {
 		h.logger.Error("Failed to create socket", "error", err)
-		http.Error(w, "Failed to create socket", http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "Failed to create socket")
 		return
 	}
 
@@ -69,7 +89,7 @@ func (h *ManagementHandler) CreateSocketHandler(w http.ResponseWriter, r *http.R
 // ListSocketsHandler handles socket listing requests
 func (h *ManagementHandler) ListSocketsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
@@ -77,7 +97,7 @@ func (h *ManagementHandler) ListSocketsHandler(w http.ResponseWriter, r *http.Re
 	socketPaths, err := h.socketService.ListSockets(r.Context())
 	if err != nil {
 		h.logger.Error("Failed to list sockets", "error", err)
-		http.Error(w, "Failed to list sockets", http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "Failed to list sockets")
 		return
 	}
 
@@ -96,14 +116,14 @@ func (h *ManagementHandler) ListSocketsHandler(w http.ResponseWriter, r *http.Re
 // DescribeSocketHandler handles socket description requests
 func (h *ManagementHandler) DescribeSocketHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
 	// Get socket name from query parameter
 	socketName := r.URL.Query().Get("socket")
 	if socketName == "" {
-		http.Error(w, "Socket parameter is required", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Socket parameter is required")
 		return
 	}
 
@@ -111,7 +131,7 @@ func (h *ManagementHandler) DescribeSocketHandler(w http.ResponseWriter, r *http
 	config, err := h.socketService.DescribeSocket(r.Context(), socketName)
 	if err != nil {
 		h.logger.Error("Failed to describe socket", "socket", socketName, "error", err)
-		http.Error(w, "Socket not found", http.StatusNotFound)
+		writeJSONError(w, http.StatusNotFound, "Socket not found")
 		return
 	}
 
@@ -130,7 +150,7 @@ func (h *ManagementHandler) DescribeSocketHandler(w http.ResponseWriter, r *http
 // DeleteSocketHandler handles socket deletion requests
 func (h *ManagementHandler) DeleteSocketHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
@@ -140,7 +160,7 @@ func (h *ManagementHandler) DeleteSocketHandler(w http.ResponseWriter, r *http.R
 		socketName = r.Header.Get("Socket-Path")
 	}
 	if socketName == "" {
-		http.Error(w, "Socket parameter is required", http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "Socket parameter is required")
 		return
 	}
 
@@ -148,7 +168,7 @@ func (h *ManagementHandler) DeleteSocketHandler(w http.ResponseWriter, r *http.R
 	err := h.socketService.DeleteSocket(r.Context(), socketName)
 	if err != nil {
 		h.logger.Error("Failed to delete socket", "socket", socketName, "error", err)
-		http.Error(w, "Failed to delete socket", http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "Failed to delete socket")
 		return
 	}
 
@@ -167,7 +187,7 @@ func (h *ManagementHandler) DeleteSocketHandler(w http.ResponseWriter, r *http.R
 // CleanSocketsHandler handles socket cleanup requests
 func (h *ManagementHandler) CleanSocketsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
@@ -175,7 +195,7 @@ func (h *ManagementHandler) CleanSocketsHandler(w http.ResponseWriter, r *http.R
 	err := h.socketService.CleanSockets(r.Context())
 	if err != nil {
 		h.logger.Error("Failed to clean sockets", "error", err)
-		http.Error(w, "Failed to clean sockets", http.StatusInternalServerError)
+		writeJSONError(w, http.StatusInternalServerError, "Failed to clean sockets")
 		return
 	}
 
