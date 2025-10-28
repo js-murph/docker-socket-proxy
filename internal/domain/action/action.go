@@ -35,22 +35,16 @@ func (e *ActionExecutor) ExecuteAction(action domain.Action, req domain.Request)
 
 // executeAllowAction executes an allow action
 func (e *ActionExecutor) executeAllowAction(action domain.Action, req domain.Request) domain.EvaluationResult {
-	// Check if action's contains criteria match
-	if len(action.Contains) > 0 && req.Body != nil {
-		// This would use a body matcher in a real implementation
-		// For now, we'll just return allow
-	}
+	// TODO: Check if action's contains criteria match when body matcher is implemented
+	// For now, we'll just return allow
 
 	return domain.NewEvaluationResult(true, action.Reason)
 }
 
 // executeDenyAction executes a deny action
 func (e *ActionExecutor) executeDenyAction(action domain.Action, req domain.Request) domain.EvaluationResult {
-	// Check if action's contains criteria match
-	if len(action.Contains) > 0 && req.Body != nil {
-		// This would use a body matcher in a real implementation
-		// For now, we'll just return deny
-	}
+	// TODO: Check if action's contains criteria match when body matcher is implemented
+	// For now, we'll just return deny
 
 	return domain.NewEvaluationResult(false, action.Reason)
 }

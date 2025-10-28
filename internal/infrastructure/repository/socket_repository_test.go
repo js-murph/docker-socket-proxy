@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestInMemorySocketRepository_SaveAndLoad(t *testing.T) {
@@ -72,8 +74,8 @@ func TestInMemorySocketRepository_List(t *testing.T) {
 	config1 := domain.SocketConfig{Name: "socket1", ListenAddress: "/tmp/socket1.sock"}
 	config2 := domain.SocketConfig{Name: "socket2", ListenAddress: "/tmp/socket2.sock"}
 
-	repo.Save(ctx, "socket1", config1)
-	repo.Save(ctx, "socket2", config2)
+	require.NoError(t, repo.Save(ctx, "socket1", config1))
+	require.NoError(t, repo.Save(ctx, "socket2", config2))
 
 	configs, err := repo.List(ctx)
 	if err != nil {
@@ -90,7 +92,7 @@ func TestInMemorySocketRepository_Delete(t *testing.T) {
 	ctx := context.Background()
 
 	config := domain.SocketConfig{Name: "test-socket", ListenAddress: "/tmp/test-socket.sock"}
-	repo.Save(ctx, "test-socket", config)
+	require.NoError(t, repo.Save(ctx, "test-socket", config))
 
 	// Verify it exists
 	_, err := repo.Load(ctx, "test-socket")
@@ -117,7 +119,7 @@ func TestFileSocketRepository_SaveAndLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	repo := NewFileSocketRepository(tempDir)
 	ctx := context.Background()
@@ -171,7 +173,7 @@ func TestFileSocketRepository_Load_NotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	repo := NewFileSocketRepository(tempDir)
 	ctx := context.Background()
@@ -187,7 +189,7 @@ func TestFileSocketRepository_List(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	repo := NewFileSocketRepository(tempDir)
 	ctx := context.Background()
@@ -195,8 +197,8 @@ func TestFileSocketRepository_List(t *testing.T) {
 	config1 := domain.SocketConfig{Name: "/tmp/socket1.sock", ListenAddress: "/tmp/socket1.sock"}
 	config2 := domain.SocketConfig{Name: "/tmp/socket2.sock", ListenAddress: "/tmp/socket2.sock"}
 
-	repo.Save(ctx, "/tmp/socket1.sock", config1)
-	repo.Save(ctx, "/tmp/socket2.sock", config2)
+	require.NoError(t, repo.Save(ctx, "/tmp/socket1.sock", config1))
+	require.NoError(t, repo.Save(ctx, "/tmp/socket2.sock", config2))
 
 	configs, err := repo.List(ctx)
 	if err != nil {
@@ -213,13 +215,13 @@ func TestFileSocketRepository_Delete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	repo := NewFileSocketRepository(tempDir)
 	ctx := context.Background()
 
 	config := domain.SocketConfig{Name: "test-socket", ListenAddress: "/tmp/test-socket.sock"}
-	repo.Save(ctx, "test-socket", config)
+	require.NoError(t, repo.Save(ctx, "test-socket", config))
 
 	// Verify it exists
 	_, err = repo.Load(ctx, "test-socket")
@@ -245,7 +247,7 @@ func TestFileSocketRepository_ConcurrentAccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	repo := NewFileSocketRepository(tempDir)
 	ctx := context.Background()

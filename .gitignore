@@ -29,6 +29,7 @@ go.work.sum
 
 # cursor
 .cursorrules
+.ai-context/**
 
 # Added by goreleaser init:
 dist/

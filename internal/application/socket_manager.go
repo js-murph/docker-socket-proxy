@@ -115,7 +115,11 @@ func (m *socketManager) createSocketFile(socketPath string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			logging.GetLogger().Error("failed to close file", "error", err)
+		}
+	}()
 
 	// Set permissions
 	if err := os.Chmod(socketPath, 0666); err != nil {

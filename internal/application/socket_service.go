@@ -88,7 +88,9 @@ func (s *socketService) CreateSocket(ctx context.Context, config domain.SocketCo
 	// Register with manager by name
 	if err := s.manager.CreateSocket(socketName, config); err != nil {
 		// Clean up repository on manager error
-		s.repo.Delete(ctx, socketName)
+		if deleteErr := s.repo.Delete(ctx, socketName); deleteErr != nil {
+			logging.GetLogger().Error("failed to clean up repository after manager error", "error", deleteErr)
+		}
 		return domain.Socket{}, fmt.Errorf("failed to create socket: %w", err)
 	}
 

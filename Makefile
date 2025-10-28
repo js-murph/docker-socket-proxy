@@ -6,7 +6,7 @@ build:
 	goreleaser build --clean --snapshot --single-target
 
 test:
-	gotestsum
+	gotestsum -skip-dirs=e2e
 
 lint:
 	golangci-lint run

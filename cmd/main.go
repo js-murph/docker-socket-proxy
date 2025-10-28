@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"os"
@@ -197,7 +198,9 @@ func runDaemon(container *DependencyContainer, logger *slog.Logger) {
 
 	<-sigChan
 	logger.Info("Shutting down server...")
-	container.Server.Stop(nil)
+	if err := container.Server.Stop(context.TODO()); err != nil {
+		logger.Error("Error stopping server", "error", err)
+	}
 }
 
 // runCreate creates a new socket

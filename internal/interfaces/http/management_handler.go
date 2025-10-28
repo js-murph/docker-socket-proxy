@@ -61,7 +61,9 @@ func (h *ManagementHandler) CreateSocketHandler(w http.ResponseWriter, r *http.R
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		logging.GetLogger().Error("failed to encode response", "error", err)
+	}
 }
 
 // ListSocketsHandler handles socket listing requests
@@ -86,7 +88,9 @@ func (h *ManagementHandler) ListSocketsHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		logging.GetLogger().Error("failed to encode response", "error", err)
+	}
 }
 
 // DescribeSocketHandler handles socket description requests
@@ -118,7 +122,9 @@ func (h *ManagementHandler) DescribeSocketHandler(w http.ResponseWriter, r *http
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		logging.GetLogger().Error("failed to encode response", "error", err)
+	}
 }
 
 // DeleteSocketHandler handles socket deletion requests
@@ -153,7 +159,9 @@ func (h *ManagementHandler) DeleteSocketHandler(w http.ResponseWriter, r *http.R
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		logging.GetLogger().Error("failed to encode response", "error", err)
+	}
 }
 
 // CleanSocketsHandler handles socket cleanup requests
@@ -178,7 +186,9 @@ func (h *ManagementHandler) CleanSocketsHandler(w http.ResponseWriter, r *http.R
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		logging.GetLogger().Error("failed to encode response", "error", err)
+	}
 }
 
 // HealthHandler handles health check requests
@@ -194,7 +204,9 @@ func (h *ManagementHandler) HealthHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		logging.GetLogger().Error("failed to encode response", "error", err)
+	}
 }
 
 // convertRulesToDomain converts HTTP request rules to domain rules

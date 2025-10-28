@@ -55,8 +55,14 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Copy response body
 	if response.Body != nil {
-		defer response.Body.Close()
-		io.Copy(w, response.Body)
+		defer func() {
+			if err := response.Body.Close(); err != nil {
+				logging.GetLogger().Error("failed to close response body", "error", err)
+			}
+		}()
+		if _, err := io.Copy(w, response.Body); err != nil {
+			logging.GetLogger().Error("failed to copy response body", "error", err)
+		}
 	}
 }
 
