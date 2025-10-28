@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"docker-socket-proxy/internal/domain"
 	"docker-socket-proxy/internal/management"
-	"docker-socket-proxy/internal/proxy/config"
 
 	"github.com/spf13/cobra"
 )
@@ -47,7 +47,7 @@ func TestRunCreate(t *testing.T) {
 
 		// Check if there's a config in the request
 		if r.Body != nil && r.Header.Get("Content-Type") == "application/json" {
-			var cfg config.SocketConfig
+			var cfg domain.SocketConfig
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
 				t.Errorf("Failed to read request body: %v", err)

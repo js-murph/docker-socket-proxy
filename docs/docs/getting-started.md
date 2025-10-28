@@ -34,6 +34,13 @@ This will:
 
 For production use, you may want to run the daemon as a systemd service. An example service file is provided in the repository at `examples/docker-socket-proxy.service`.
 
+## Socket Names and Paths
+
+- A socket has a name (identifier) and a path (filesystem location).
+- Use the name for management commands (`list`, `describe`, `delete`).
+- Use the path with Docker clients (e.g., `docker -H unix:///path.sock`).
+- If `listen_address` is not provided in the config, the path is generated as `/var/run/docker-proxy/{name}.sock`.
+
 ## Creating Your First Proxy Socket
 
 1. Create a configuration file (e.g., `config.yaml`):
@@ -76,11 +83,7 @@ rules:
 docker-socket-proxy socket create -c config.yaml
 ```
 
-The command will output the path to your new proxy socket, typically something like:
-
-```
-Socket created: /var/run/docker-proxy/socket-12345.sock
-```
+The command will output the path to your new proxy socket (e.g., `/var/run/docker-proxy/my-proxy.sock`). Use this path with Docker clients.
 
 ## Using the Proxy Socket
 
@@ -107,13 +110,13 @@ docker-socket-proxy socket list
 View the configuration of a specific socket:
 
 ```bash
-docker-socket-proxy socket describe socket-12345.sock
+docker-socket-proxy socket describe my-proxy
 ```
 
 Delete a socket when you no longer need it:
 
 ```bash
-docker-socket-proxy socket delete socket-12345.sock
+docker-socket-proxy socket delete my-proxy
 ```
 
 ## Next Steps

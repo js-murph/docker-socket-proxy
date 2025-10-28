@@ -41,7 +41,7 @@ To create a new proxy socket run:
 docker-socket-proxy socket create -c /path/to/config.yaml
 ```
 
-This will return a socket that you can use instead of the Docker socket with the rules applied.
+This will return the socket path that you can use with Docker clients.
 
 See the [Getting Started](getting-started.md) section for more details.
 
