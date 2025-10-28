@@ -77,17 +77,14 @@ docker-socket-proxy socket create -c /path/to/config.yaml
 Deletes an existing proxy socket.
 
 ```bash
-docker-socket-proxy socket delete [socket-path]
+docker-socket-proxy socket delete [socket-name]
 ```
 
 ### Example
 
 ```bash
-# Delete a socket by name
-docker-socket-proxy socket delete my-socket.sock
-
-# Delete a socket by full path
-docker-socket-proxy socket delete /var/run/docker-proxy/my-socket.sock
+# Delete a socket by name (no .sock extension)
+docker-socket-proxy socket delete my-socket
 ```
 
 ## socket list
@@ -116,6 +113,15 @@ docker-socket-proxy socket describe [socket-name]
 ### Example
 
 ```bash
-# Describe a socket
-docker-socket-proxy socket describe my-socket.sock
+# Describe a socket by name (no .sock extension)
+docker-socket-proxy socket describe my-socket
 ```
+
+## Understanding Socket Names vs Paths
+
+- Socket name: short identifier used for management commands (`list`, `describe`, `delete`). Examples: `my-socket`, `traefik`, `ci-docker`.
+- Socket path: full filesystem path used by Docker clients. Example: `/var/run/docker-proxy/my-socket.sock`.
+
+Guidance:
+- Use the name with CLI management commands.
+- Use the path with Docker CLI, e.g.: `docker -H unix:///var/run/docker-proxy/my-socket.sock ps`.
