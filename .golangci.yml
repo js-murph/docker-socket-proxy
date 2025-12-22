@@ -1,0 +1,6 @@
+# .golangci.yml
+version: "2"
+linters:
+  exclusions:
+    paths:
+      - e2e

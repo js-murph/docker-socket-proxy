@@ -19,6 +19,15 @@ rules:
         reason: "Listing volumes is restricted"
 ```
 
+## Top-level Fields
+
+These fields control the socket identity and path:
+
+| Field | Description | Required | Default |
+|-------|-------------|----------|---------|
+| `name` | Socket identifier used for management (no slashes, <=100 chars) | No | auto-generated UUID-like name |
+| `listen_address` | Filesystem path for the socket file | No | `/var/run/docker-proxy/{name}.sock` |
+
 ## Config Section
 
 The `config` section contains global settings for the proxy socket:
@@ -121,6 +130,10 @@ actions:
 Here's a complete example configuration:
 
 ```yaml
+# With custom name and custom path
+name: "my-proxy"
+listen_address: "/var/run/docker-proxy/my-proxy.sock"
+
 config:
   propagate_socket: "/var/run/docker.sock"
 
