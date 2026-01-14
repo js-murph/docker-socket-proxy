@@ -7,8 +7,8 @@ import (
 	"io"
 	"net/http"
 
+	"docker-socket-proxy/internal/domain"
 	"docker-socket-proxy/internal/management"
-	"docker-socket-proxy/internal/proxy/config"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -21,10 +21,10 @@ func RunCreate(cmd *cobra.Command, paths *management.SocketPaths) {
 
 	configPath, _ := cmd.Flags().GetString("config")
 
-	var socketConfig *config.SocketConfig
+	var socketConfig *domain.SocketConfig
 	if configPath != "" {
 		var err error
-		socketConfig, err = config.LoadSocketConfig(configPath)
+		socketConfig, err = domain.LoadSocketConfig(configPath)
 		if err != nil {
 			errOut.Error(fmt.Errorf("error loading configuration: %v", err))
 			osExit(1)
